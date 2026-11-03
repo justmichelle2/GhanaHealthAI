@@ -16,7 +16,7 @@ def get_current_user(access_token: str | None = Cookie(default=None, alias="gha_
     except (jwt.PyJWTError, KeyError, ValueError, RuntimeError):
         raise unauthorized from None
     user = db.get(User, user_id)
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or claims.get("ver", 0) != user.session_version:
         raise unauthorized
     return user
 

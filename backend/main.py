@@ -12,11 +12,22 @@ from app.routers.admin import router as admin_router
 settings = get_settings()
 logger = logging.getLogger("ghana_health.database")
 app = FastAPI(title="Ghana Health Assistant API", description="Multilingual health information and clinician review service. Not clinically validated.", version="0.3.0")
-app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins, allow_credentials=True, allow_methods=["GET", "POST", "PATCH", "OPTIONS"], allow_headers=["Content-Type", "X-CSRF-Token"])
+app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins, allow_credentials=True, allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "X-CSRF-Token"])
 app.include_router(auth_router)
 app.include_router(patient_router)
 app.include_router(doctor_router)
 app.include_router(admin_router)
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if settings.secure_cookies and request.url.scheme == "https":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
 
 @app.get("/", tags=["root"])
 def read_root():

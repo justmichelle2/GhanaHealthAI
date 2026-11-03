@@ -16,12 +16,12 @@ def verify_password(password: str, encoded_hash: str) -> bool:
     except Exception:
         return False
 
-def create_access_token(subject: str) -> str:
+def create_access_token(subject: str, session_version: int = 0) -> str:
     settings = get_settings()
     if not settings.secret_key or len(settings.secret_key) < 32 or settings.secret_key.startswith(("replace-", "change-me")):
         raise RuntimeError("Set SECRET_KEY to a unique random value of at least 32 characters")
     now = datetime.now(timezone.utc)
-    return jwt.encode({"sub": subject, "iat": now, "exp": now + timedelta(minutes=settings.access_token_expire_minutes)}, settings.secret_key, algorithm="HS256")
+    return jwt.encode({"sub": subject, "ver": session_version, "iat": now, "exp": now + timedelta(minutes=settings.access_token_expire_minutes)}, settings.secret_key, algorithm="HS256")
 
 def decode_access_token(token: str) -> dict:
     settings = get_settings()

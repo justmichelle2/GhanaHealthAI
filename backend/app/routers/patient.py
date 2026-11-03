@@ -1,17 +1,97 @@
 from datetime import datetime, timezone
+from datetime import timedelta
+import secrets
 from typing import Any
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.dependencies import require_role
-from app.models import AuditLog, Conversation, ConversationMessage, PatientProfile, User, UserRole
-from app.schemas import ConversationCreate, ConversationDetail, ConversationMessageCreate, ConversationRename, ConversationSummary, PatientProfileResponse, PatientProfileUpdate
+from app.models import AuditLog, Conversation, ConversationMessage, ConversationShare, PatientProfile, User, UserRole
+from app.schemas import ConversationCreate, ConversationDetail, ConversationMessageCreate, ConversationRename, ConversationShareCreate, ConversationSummary, PatientProfileResponse, PatientProfileUpdate, ShareTokenRequest, SharedConversation
+from app.routers.auth import token_digest, enforce_limit
 
 
 router = APIRouter(prefix="/patient", tags=["patient profile"])
+
+
+@router.post("/conversations/{conversation_id}/shares", status_code=201)
+def create_share_link(conversation_id: UUID, payload: ConversationShareCreate,
+                      user: User = Depends(require_role(UserRole.PATIENT)),
+                      db: Session = Depends(get_db)) -> dict[str, Any]:
+    conversation = owned_conversation(db, user, conversation_id)
+    now = datetime.now(timezone.utc)
+    if not enforce_limit(db, "share-create:" + str(user.id), maximum=10, window=timedelta(hours=1), now=now):
+        db.commit()
+        raise HTTPException(status_code=429, detail="Too many share links. Please try again later.")
+    raw_token = secrets.token_urlsafe(32)
+    share = ConversationShare(conversation_id=conversation.id, created_by_user_id=user.id,
+                              token_hash=token_digest(raw_token),
+                              created_at=now, expires_at=now + timedelta(hours=payload.expires_in_hours))
+    db.add(share)
+    db.add(AuditLog(actor_user_id=user.id, action="conversation_share_created", resource_type="conversation", resource_id=str(conversation.id)))
+    db.commit()
+    db.refresh(share)
+    return {"id": share.id, "token": raw_token, "created_at": share.created_at, "expires_at": share.expires_at}
+
+
+@router.get("/conversations/{conversation_id}/shares")
+def list_share_links(conversation_id: UUID, user: User = Depends(require_role(UserRole.PATIENT)),
+                      db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    owned_conversation(db, user, conversation_id)
+    now = datetime.now(timezone.utc)
+    shares = db.scalars(select(ConversationShare).where(ConversationShare.conversation_id == conversation_id)
+                        .order_by(ConversationShare.created_at.desc())).all()
+    return [{"id": item.id, "created_at": item.created_at, "expires_at": item.expires_at,
+             "revoked_at": item.revoked_at, "active": item.revoked_at is None and (item.expires_at if item.expires_at.tzinfo else item.expires_at.replace(tzinfo=timezone.utc)) > now}
+            for item in shares]
+
+
+@router.delete("/conversations/{conversation_id}/shares/{share_id}", status_code=204)
+def revoke_share_link(conversation_id: UUID, share_id: UUID,
+                      user: User = Depends(require_role(UserRole.PATIENT)),
+                      db: Session = Depends(get_db)) -> Response:
+    owned_conversation(db, user, conversation_id)
+    share = db.scalar(select(ConversationShare).where(ConversationShare.id == share_id,
+                          ConversationShare.conversation_id == conversation_id))
+    if share is None:
+        raise HTTPException(status_code=404, detail="Share link not found")
+    if share.revoked_at is None:
+        share.revoked_at = datetime.now(timezone.utc)
+        db.add(AuditLog(actor_user_id=user.id, action="conversation_share_revoked", resource_type="conversation", resource_id=str(conversation_id)))
+        db.commit()
+    return Response(status_code=204)
+
+
+@router.post("/public/shares/resolve", response_model=SharedConversation)
+def resolve_share_link(payload: ShareTokenRequest, request: Request, response: Response,
+                       db: Session = Depends(get_db)) -> SharedConversation:
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    ip = request.client.host if request.client else "unknown"
+    now = datetime.now(timezone.utc)
+    if not enforce_limit(db, "share-ip:" + ip, maximum=30, window=timedelta(minutes=10), now=now):
+        db.commit()
+        raise HTTPException(status_code=429, detail="Too many requests. Please try again later.")
+    share = db.scalar(select(ConversationShare).where(ConversationShare.token_hash == token_digest(payload.token),
+                              ConversationShare.revoked_at.is_(None), ConversationShare.expires_at > now))
+    if share is None:
+        db.commit()
+        raise HTTPException(status_code=404, detail="This share link is unavailable or has expired")
+    conversation = db.get(Conversation, share.conversation_id)
+    if conversation is None:
+        db.commit()
+        raise HTTPException(status_code=404, detail="This share link is unavailable or has expired")
+    conversation.messages.sort(key=lambda item: item.created_at)
+    db.commit()
+    return SharedConversation(preferred_language=conversation.preferred_language, created_at=conversation.created_at,
+                              messages=[{"sender_role": message.sender_role, "body": message.body, "created_at": message.created_at}
+                                        for message in conversation.messages])
 
 
 @router.get("/profile", response_model=PatientProfileResponse)

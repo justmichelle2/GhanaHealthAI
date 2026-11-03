@@ -31,6 +31,19 @@ class LoginRequest(BaseModel):
     def normalize_email(cls, value: str) -> str:
         return value.strip().lower()
 
+class PasswordResetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: EmailStr
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return value.strip().lower()
+
+class PasswordResetConfirm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    token: str = Field(min_length=32, max_length=128)
+    password: str = Field(min_length=12, max_length=128)
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -96,6 +109,32 @@ class ConversationRename(BaseModel):
         if not normalized:
             raise ValueError("Title cannot be blank")
         return normalized
+
+class ConversationShareCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirmed: Literal[True]
+    expires_in_hours: Literal[1, 24, 168] = 24
+
+class ShareLinkSummary(BaseModel):
+    id: UUID
+    created_at: datetime
+    expires_at: datetime
+    revoked_at: datetime | None
+    active: bool
+
+class SharedMessage(BaseModel):
+    sender_role: Literal["patient", "assistant", "doctor"]
+    body: str
+    created_at: datetime
+
+class SharedConversation(BaseModel):
+    preferred_language: str
+    created_at: datetime
+    messages: list[SharedMessage]
+
+class ShareTokenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    token: str = Field(min_length=32, max_length=128)
 
 class ConversationMessageCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")

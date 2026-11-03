@@ -11,6 +11,13 @@ class Settings(BaseSettings):
     secret_key: str | None = None
     access_token_expire_minutes: int = 30
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    frontend_url: str = "http://localhost:5173"
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_sender: str | None = None
+    password_reset_minutes: int = 30
 
     @property
     def allowed_origins(self) -> list[str]:
@@ -19,6 +26,10 @@ class Settings(BaseSettings):
     @property
     def secure_cookies(self) -> bool:
         return self.app_env.lower() == "production"
+
+    @property
+    def email_configured(self) -> bool:
+        return bool(self.smtp_host and self.smtp_sender)
 
 @lru_cache
 def get_settings() -> Settings:

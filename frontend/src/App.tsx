@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { loadInterfaceLanguage, translate, type InterfaceLanguage, type TranslationKey } from './i18n/resources'
 
 type User = { id: string; email: string; role: 'patient' | 'doctor' | 'admin'; is_active: boolean; created_at: string }
 type Profile = { full_name: string | null; preferred_language: string | null }
@@ -9,8 +10,11 @@ type Review = Conversation & { message: string; reviewed_at: string | null; revi
 type AdminUser = { id: string; email: string; role: string; is_active: boolean; created_at: string; display_name: string | null; is_verified: boolean | null; professional_details: string | null }
 type AuditEntry = { id: string; action: string; resource_type: string; resource_id: string | null; created_at: string }
 type Page = 'loading' | 'landing' | 'login' | 'register' | 'dashboard' | 'assistant' | 'history' | 'profile' | 'doctor' | 'admin' | 'unavailable'
+  | 'forgot' | 'reset' | 'shared'
 type Overview = { users: number; patients: number; doctors_pending_verification: number; submissions_pending_review: number }
 type ThemeMode = 'system' | 'light' | 'dark'
+type ShareLink = { id: string; created_at: string; expires_at: string; revoked_at: string | null; active: boolean }
+type PublicConversation = { preferred_language: string; created_at: string; messages: { sender_role: string; body: string; created_at: string }[] }
 
 const API = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
 const LANGUAGES = [{ value: 'en', label: 'English' }, { value: 'tw', label: 'Twi' }, { value: 'ee', label: 'Ewe' }, { value: 'gaa', label: 'Ga' }, { value: 'ha', label: 'Hausa' }]
@@ -75,6 +79,17 @@ function App() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [language, setLanguage] = useState('en')
+  const [interfaceLanguage, setInterfaceLanguage] = useState<InterfaceLanguage>(() => loadInterfaceLanguage(localStorage))
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetToken, setResetToken] = useState('')
+  const [resetPassword, setResetPassword] = useState('')
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('')
+  const [shareDialogOpen, setShareDialogOpen] = useState(false)
+  const [shareExpiry, setShareExpiry] = useState<1 | 24 | 168>(24)
+  const [shareConfirmed, setShareConfirmed] = useState(false)
+  const [shareToken, setShareToken] = useState('')
+  const [shareLinks, setShareLinks] = useState<ShareLink[]>([])
+  const [publicConversation, setPublicConversation] = useState<PublicConversation | null>(null)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [busy, setBusy] = useState(false)
@@ -93,6 +108,7 @@ function App() {
     return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'system'
   })
   const chatBodyRef = useRef<HTMLDivElement>(null)
+  const bootHashRef = useRef(window.location.hash)
 
   useEffect(() => {
     if (selectedChat && chatBodyRef.current) chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight
@@ -110,6 +126,22 @@ function App() {
     media.addEventListener('change', applyTheme)
     return () => media.removeEventListener('change', applyTheme)
   }, [themeMode])
+
+  useEffect(() => {
+    localStorage.setItem('gha-interface-language', interfaceLanguage)
+    document.documentElement.lang = interfaceLanguage
+  }, [interfaceLanguage])
+
+  useEffect(() => {
+    if (page !== 'shared') return
+    document.title = 'Shared conversation · Ghana Health Assistant'
+    let robots = document.querySelector('meta[name="robots"]')
+    if (!robots) { robots = document.createElement('meta'); robots.setAttribute('name', 'robots'); document.head.appendChild(robots) }
+    robots.setAttribute('content', 'noindex,nofollow,noarchive')
+    return () => { document.title = 'Ghana Health Assistant' }
+  }, [page])
+
+  const t = (key: TranslationKey) => translate(interfaceLanguage, key)
 
   async function loadWorkspace(account: User) {
     setUser(account); setError('')
@@ -136,6 +168,25 @@ function App() {
   useEffect(() => {
     let active = true
     async function restore() {
+      const fragment = bootHashRef.current
+      if (fragment.startsWith('#reset/')) {
+        const token = fragment.slice('#reset/'.length)
+        window.history.replaceState(null, '', window.location.pathname + window.location.search)
+        if (active && token) { setResetToken(token); setPage('reset') }
+        return
+      }
+      if (fragment.startsWith('#share/')) {
+        const token = fragment.slice('#share/'.length)
+        window.history.replaceState(null, '', window.location.pathname + window.location.search)
+        setPage('shared')
+        try {
+          const conversation = await request<PublicConversation>('/patient/public/shares/resolve', { method: 'POST', body: JSON.stringify({ token }) })
+          if (active) setPublicConversation(conversation)
+        } catch {
+          if (active) setError('This link is unavailable or has expired.')
+        }
+        return
+      }
       try {
         await request<void>('/auth/csrf')
         const account = await request<User>('/auth/me')
@@ -154,6 +205,27 @@ function App() {
     setAuthMode(mode); setError(''); setSuccess(''); setPage(mode)
   }
   function navigate(next: Page) { setPage(next); setError(''); setSuccess(''); setChatDrawerOpen(false) }
+
+  async function requestPasswordReset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError(''); setSuccess(''); setBusy(true)
+    try {
+      await request<void>('/auth/csrf')
+      const result = await request<{ message: string }>('/auth/password-reset/request', { method: 'POST', body: JSON.stringify({ email: resetEmail.trim() }) })
+      setSuccess(result.message)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to request a reset link.') }
+    finally { setBusy(false) }
+  }
+
+  async function submitPasswordReset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError(''); setSuccess('')
+    if (resetPassword !== resetConfirmPassword) { setError('Your passwords do not match.'); return }
+    setBusy(true)
+    try {
+      const result = await request<{ message: string }>('/auth/password-reset/confirm', { method: 'POST', body: JSON.stringify({ token: resetToken, password: resetPassword }) })
+      setSuccess(result.message); setResetToken(''); setResetPassword(''); setResetConfirmPassword('')
+    } catch (reason) { setError(reason instanceof Error ? reason.message : t('resetUnavailable')) }
+    finally { setBusy(false) }
+  }
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(''); setSuccess('')
@@ -245,15 +317,49 @@ function App() {
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to delete conversation.') }
   }
 
-  async function shareChat(chat: ConversationDetail | null) {
+  async function openShareDialog(chat: ConversationDetail | null) {
     if (!chat) { setError('Open a saved conversation before sharing it.'); return }
-    const text = [chat.title, '', ...chat.messages.map((message) => `${message.sender_role === 'patient' ? 'You' : 'Health Assistant'} · ${new Date(message.created_at).toLocaleString()}\n${message.body}`)].join('\n\n')
-    try { await navigator.clipboard.writeText(text); setSuccess('Conversation copied to clipboard. Review it before sharing.'); }
-    catch { setError('Clipboard access is unavailable. Select and copy the conversation text manually.') }
+    setSelectedChat(chat); setShareToken(''); setShareConfirmed(false); setShareDialogOpen(true)
+    try { setShareLinks(await request<ShareLink[]>('/patient/conversations/' + chat.id + '/shares')) }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to load share links.') }
+  }
+
+  async function shareChat(chat: ConversationDetail | null) {
+    await openShareDialog(chat)
+  }
+
+  async function createShareLink() {
+    if (!selectedChat || !shareConfirmed) return
+    setBusy(true); setError('')
+    try {
+      const created = await request<{ id: string; token: string; expires_at: string }>('/patient/conversations/' + selectedChat.id + '/shares', {
+        method: 'POST', body: JSON.stringify({ confirmed: true, expires_in_hours: shareExpiry }),
+      })
+      setShareToken(window.location.origin + window.location.pathname + '#share/' + created.token)
+      setShareLinks(await request<ShareLink[]>('/patient/conversations/' + selectedChat.id + '/shares'))
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to create a share link.') }
+    finally { setBusy(false) }
+  }
+
+  async function copyShareLink() {
+    if (!shareToken) return
+    try { await navigator.clipboard.writeText(shareToken); setSuccess('Share link copied. Anyone who receives it can view this conversation until it expires or is revoked.') }
+    catch { setError('Clipboard access is unavailable. You can select and copy the link.') }
+  }
+
+  async function revokeShareLink(shareId: string) {
+    if (!selectedChat) return
+    setBusy(true)
+    try {
+      await request<void>('/patient/conversations/' + selectedChat.id + '/shares/' + shareId, { method: 'DELETE' })
+      setShareLinks(await request<ShareLink[]>('/patient/conversations/' + selectedChat.id + '/shares'))
+      setSuccess('Share link revoked.')
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to revoke this link.') }
+    finally { setBusy(false) }
   }
 
   async function shareSavedChat(item: Conversation) {
-    try { await shareChat(await request<ConversationDetail>('/patient/conversations/' + item.id)) }
+    try { await openShareDialog(await request<ConversationDetail>('/patient/conversations/' + item.id)) }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to load conversation for sharing.') }
   }
 
@@ -316,8 +422,8 @@ function App() {
         <a className="brand" href="#" onClick={(event) => { event.preventDefault(); if (user) navigate(user.role === 'patient' ? 'dashboard' : user.role); else navigate('landing') }} aria-label="Ghana Health Assistant home">
           <span className="brand-mark">+</span><span className="brand-copy"><strong>Ghana Health</strong><small>ASSISTANT</small></span>
         </a>
-        <div className="topbar-right">{user && <button className="icon-button app-menu-button mobile-only" onClick={() => setChatDrawerOpen(true)} aria-label="Open application navigation">☰</button>}<label className="theme-control"><span className="sr-only">Color theme</span><select aria-label="Color theme" value={themeMode} onChange={(event) => setThemeMode(event.target.value as ThemeMode)}><option value="system">System theme</option><option value="light">Light theme</option><option value="dark">Dark theme</option></select></label>{user ? <><span className="session-badge"><i /> Secure session</span><span className="user-chip">{user.role === 'patient' ? displayName : user.email}</span><button className="button button-outline button-small" onClick={() => void logout()} disabled={busy}>Sign out</button></> :
-          page !== 'login' && page !== 'register' && <><button className="button button-quiet" onClick={() => beginAuth('login')}>Sign in</button><button className="button button-primary button-small" onClick={() => beginAuth('register')}>Create account</button></>}
+        <div className="topbar-right">{user && <button className="icon-button app-menu-button mobile-only" onClick={() => setChatDrawerOpen(true)} aria-label="Open application navigation">☰</button>}<label className="theme-control"><span className="sr-only">Color theme</span><select aria-label="Color theme" value={themeMode} onChange={(event) => setThemeMode(event.target.value as ThemeMode)}><option value="system">System theme</option><option value="light">Light theme</option><option value="dark">Dark theme</option></select></label><label className="theme-control"><span className="sr-only">{t('languageLabel')}</span><select aria-label={t('languageLabel')} value={interfaceLanguage} onChange={(event) => setInterfaceLanguage(event.target.value as InterfaceLanguage)}>{LANGUAGES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>{user ? <><span className="session-badge"><i /> Secure session</span><span className="user-chip">{user.role === 'patient' ? displayName : user.email}</span><button className="button button-outline button-small" onClick={() => void logout()} disabled={busy}>Sign out</button></> :
+          !['login', 'register', 'forgot', 'reset', 'shared'].includes(page) && <><button className="button button-quiet" onClick={() => beginAuth('login')}>{t('signIn')}</button><button className="button button-primary button-small" onClick={() => beginAuth('register')}>{t('createAccount')}</button></>}
         </div>
       </header>
 
@@ -351,10 +457,17 @@ function App() {
             {authMode === 'register' && <><label htmlFor="confirm-password">Confirm password</label><div className="password-wrap"><input id="confirm-password" type={showPassword ? 'text' : 'password'} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} minLength={12} maxLength={128} required placeholder="Enter password again" /><button type="button" onClick={() => setShowPassword((shown) => !shown)}>{showPassword ? 'Hide' : 'Show'}</button></div><p className="field-hint">Use at least 12 characters. Choose a unique password.</p></>}
             {error && <p className="alert alert-error" role="alert">{error}</p>}<button className="button button-primary button-full button-large" type="submit" disabled={busy}>{busy ? 'Please wait…' : authMode === 'login' ? 'Sign in securely' : 'Create patient account'} {!busy && <span>→</span>}</button>
           </form>
-          <p className="auth-switch">{authMode === 'login' ? 'New to the project?' : 'Already have an account?'} <button onClick={() => beginAuth(authMode === 'login' ? 'register' : 'login')}>{authMode === 'login' ? 'Create account' : 'Sign in'}</button></p>
+          {authMode === 'login' && <button className="back-link" onClick={() => { setResetEmail(email); setError(''); setSuccess(''); setPage('forgot') }}>{t('forgotPassword')}</button>}
+          <p className="auth-switch">{authMode === 'login' ? 'New to the project?' : 'Already have an account?'} <button onClick={() => beginAuth(authMode === 'login' ? 'register' : 'login')}>{authMode === 'login' ? t('createAccount') : t('signIn')}</button></p>
           <div className="medical-notice compact"><span>i</span><p>Do not use this service for emergencies or as a substitute for care from a qualified health professional.</p></div>
         </section>
       </main>}
+
+      {page === 'forgot' && !user && <main className="auth-layout"><section className="auth-aside"><span className="eyebrow">GHANA HEALTH ASSISTANT</span><h1>Recover your account.</h1><p>Request a time-limited password reset link by email.</p></section><section className="auth-panel"><button className="back-link" onClick={() => { setPage('login'); setError(''); setSuccess('') }}>← Back to sign in</button><h2>{t('forgotPassword')}</h2><p className="panel-lead">If an account matches the email, we’ll send reset instructions.</p><form className="form-stack" onSubmit={(event) => void requestPasswordReset(event)}><label htmlFor="reset-email">Email address</label><input id="reset-email" type="email" autoComplete="email" value={resetEmail} onChange={(event) => setResetEmail(event.target.value)} required maxLength={320} />{error && <p className="alert alert-error" role="alert">{error}</p>}{success && <p className="alert alert-success" role="status">{success}</p>}<button className="button button-primary button-full" type="submit" disabled={busy}>{busy ? t('loading') : t('sendResetLink')}</button></form></section></main>}
+
+      {page === 'reset' && !user && <main className="auth-layout"><section className="auth-aside"><span className="eyebrow">GHANA HEALTH ASSISTANT</span><h1>Choose a new password.</h1><p>{t('passwordGuidance')}</p></section><section className="auth-panel"><h2>{t('resetPassword')}</h2>{success ? <><p className="alert alert-success" role="status">{success}</p><button className="button button-primary" onClick={() => { setPage('login'); setSuccess(''); setError('') }}>{t('signIn')}</button></> : <form className="form-stack" onSubmit={(event) => void submitPasswordReset(event)}><label htmlFor="new-password">{t('newPassword')}</label><input id="new-password" type={showPassword ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={128} required value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} /><label htmlFor="confirm-reset-password">{t('confirmPassword')}</label><input id="confirm-reset-password" type={showPassword ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={128} required value={resetConfirmPassword} onChange={(event) => setResetConfirmPassword(event.target.value)} /><button type="button" className="back-link" onClick={() => setShowPassword((value) => !value)}>{showPassword ? 'Hide passwords' : 'Show passwords'}</button>{error && <p className="alert alert-error" role="alert">{error}</p>}<button className="button button-primary button-full" disabled={busy}>{busy ? t('loading') : t('resetPassword')}</button></form>}</section></main>}
+
+      {page === 'shared' && <main className="shared-page"><section className="shared-card"><span className="eyebrow">GHANA HEALTH ASSISTANT · SHARED VIEW</span><h1>Shared conversation</h1><p className="medical-notice compact">{t('sharedReadOnly')}</p>{error && <p className="alert alert-error" role="alert">{error}</p>}{!publicConversation && !error && <p role="status">{t('loading')}</p>}{publicConversation && <><p>Conversation language: {languageName(publicConversation.preferred_language)} · {new Date(publicConversation.created_at).toLocaleDateString()}</p><div className="chat-messages">{publicConversation.messages.map((message, index) => <article key={`${message.created_at}-${index}`} className={message.sender_role === 'patient' ? 'chat-message patient-message' : 'chat-message assistant-message'}><span>{message.sender_role === 'patient' ? 'Patient' : message.sender_role === 'doctor' ? 'Clinician' : 'Health Assistant'} · {new Date(message.created_at).toLocaleString()}</span><p>{message.body}</p></article>)}</div></>}</section></main>}
 
       {user && <div className={`workspace ${user.role === 'patient' ? 'chat-workspace' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${chatDrawerOpen ? 'sidebar-open' : ''}`}>
         {chatDrawerOpen && <button className="app-drawer-backdrop mobile-only" aria-label="Close navigation" onClick={() => setChatDrawerOpen(false)} />}
@@ -380,7 +493,7 @@ function App() {
           </section>}
 
           {user.role === 'patient' && page === 'assistant' && <section className="chat-page">
-            <div className="chat-page-heading"><div><span className="eyebrow">HEALTH ASSISTANT</span><h1>{selectedChat?.title || 'New conversation'}</h1><p>Messages are saved to your account and routed for clinician review. Automated health answers are unavailable.</p></div><div className="chat-heading-actions"><label className="language-picker">LANGUAGE<select value={language} onChange={(event) => setLanguage(event.target.value)}>{LANGUAGES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><button className="button button-outline button-small" onClick={() => void shareChat(selectedChat)} disabled={!selectedChat}>Copy share text</button></div></div>
+            <div className="chat-page-heading"><div><span className="eyebrow">HEALTH ASSISTANT</span><h1>{selectedChat?.title || 'New conversation'}</h1><p>Messages are saved to your account and routed for clinician review. Automated health answers are unavailable.</p></div><div className="chat-heading-actions"><label className="language-picker">LANGUAGE<select value={language} onChange={(event) => setLanguage(event.target.value)}>{LANGUAGES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><button className="button button-outline button-small" onClick={() => void shareChat(selectedChat)} disabled={!selectedChat}>{t('shareConversation')}</button></div></div>
             <div className="chat-layout" aria-busy={chatBusy}>
               <aside className={chatDrawerOpen ? 'chat-history-panel drawer-open' : 'chat-history-panel'} aria-label="Conversation history"><div className="chat-history-brand"><span className="chat-mark">+</span><strong>Conversations</strong><button className="icon-button mobile-only" onClick={() => setChatDrawerOpen(false)} aria-label="Close conversation history">×</button></div><button className="button button-primary chat-new-button" onClick={newChat}>＋ New chat</button><label className="chat-search"><span>Search conversations</span><input type="search" value={chatSearch} onChange={(event) => void searchChats(event.target.value)} placeholder="Search titles" /></label><div className="chat-history-list">{chatResults.length === 0 ? <div className="chat-empty"><strong>{chatSearch ? 'No matching conversations' : 'No conversations yet'}</strong><p>{chatSearch ? 'Try a different title.' : 'Your saved messages will appear here.'}</p></div> : ['Today', 'Yesterday', 'Previous days'].map((group) => { const groupItems = chatResults.filter((item) => conversationDateGroup(item.updated_at || item.created_at) === group); return groupItems.length ? <div className="chat-history-group" key={group}><strong>{group}</strong>{groupItems.map((item) => <article className={selectedChat?.id === item.id ? 'chat-history-item selected' : 'chat-history-item'} key={item.id}><button onClick={() => void openChat(item.id)}><strong>{item.title || 'Health conversation'}</strong><small>{item.status === 'pending_review' ? 'Pending review' : 'Reviewed'}</small></button><div><button className="icon-button" aria-label={'Rename ' + item.title} onClick={() => void renameChat(item)}>✎</button><button className="icon-button" aria-label={'Copy ' + item.title} onClick={() => void shareSavedChat(item)}>↗</button><button className="icon-button danger-icon" aria-label={'Delete ' + item.title} onClick={() => void deleteChat(item)}>×</button></div></article>)}</div> : null })}</div><div className="chat-sidebar-note">Your conversations are private to your account.</div></aside>
               {chatDrawerOpen && <button className="drawer-backdrop mobile-only" aria-label="Close conversation history" onClick={() => setChatDrawerOpen(false)} />}
@@ -417,6 +530,8 @@ function App() {
           </section>}
         </main>
       </div>}
+
+      {shareDialogOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) { setShareDialogOpen(false); setShareToken('') } }}><section className="modal-card share-dialog" role="dialog" aria-modal="true" aria-labelledby="share-dialog-title"><button className="modal-close" type="button" aria-label="Close share dialog" onClick={() => { setShareDialogOpen(false); setShareToken('') }}>×</button><span className="eyebrow">PRIVATE UNTIL YOU SHARE</span><h2 id="share-dialog-title">{t('shareConversation')}</h2><p>{t('shareWarning')}</p><p className="share-permission">Read-only access. The recipient cannot change or reply to your conversation.</p><label className="form-stack">Link expires<select value={shareExpiry} onChange={(event) => setShareExpiry(Number(event.target.value) as 1 | 24 | 168)}><option value={1}>After 1 hour</option><option value={24}>After 24 hours (recommended)</option><option value={168}>After 7 days (maximum)</option></select></label><label className="consent-control share-confirm"><input type="checkbox" checked={shareConfirmed} onChange={(event) => setShareConfirmed(event.target.checked)} /><span>{t('confirmSharing')}</span></label>{shareToken && <div className="share-link-result"><label htmlFor="share-link-output">Share link (shown only once)</label><input id="share-link-output" readOnly value={shareToken} onFocus={(event) => event.currentTarget.select()} /><button className="button button-outline" type="button" onClick={() => void copyShareLink()}>{t('copyLink')}</button></div>}<button className="button button-primary" type="button" onClick={() => void createShareLink()} disabled={busy || !shareConfirmed}>{busy ? t('loading') : t('createShareLink')}</button><div className="share-active-links"><h3>Existing links</h3>{shareLinks.length === 0 ? <p>No links have been created for this conversation.</p> : shareLinks.map((item) => <article key={item.id} className="share-link-row"><div><strong>{item.active ? 'Active' : item.revoked_at ? 'Revoked' : 'Expired'}</strong><small>Expires {new Date(item.expires_at).toLocaleString()}</small></div>{item.active && <button className="button button-quiet button-small" type="button" disabled={busy} onClick={() => void revokeShareLink(item.id)}>{t('revokeLink')}</button>}</article>)}</div></section></div>}
 
       <footer className={user ? 'footer workspace-footer' : 'footer'}><span>Ghana Health Assistant</span><span>Health information with clinician oversight</span></footer>
     </div>
