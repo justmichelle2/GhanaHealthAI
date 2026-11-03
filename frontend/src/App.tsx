@@ -119,8 +119,8 @@ function App() {
     const input = composerRef.current
     if (!input) return
     input.style.height = 'auto'
-    input.style.height = `${Math.min(input.scrollHeight, 150)}px`
-    input.style.overflowY = input.scrollHeight > 150 ? 'auto' : 'hidden'
+    input.style.height = `${Math.min(input.scrollHeight, 184)}px`
+    input.style.overflowY = input.scrollHeight > 184 ? 'auto' : 'hidden'
   }, [messageDraft])
 
   useEffect(() => {
