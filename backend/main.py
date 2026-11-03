@@ -44,5 +44,5 @@ def readiness_check():
             session.execute(text("SELECT 1"))
     except Exception as exc:
         logger.error("Database readiness check failed (%s)", type(exc).__name__)
-        raise HTTPException(status_code=503, detail="Database unavailable. Check PostgreSQL configuration and service status.") from None
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable. Please try again shortly.") from None
     return {"status": "ready", "database": "available"}

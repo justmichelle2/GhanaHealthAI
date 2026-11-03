@@ -19,7 +19,8 @@ def get_session_factory() -> sessionmaker[Session]:
         raise RuntimeError("DATABASE_URL is not configured")
     if not database_url.startswith("postgresql+psycopg://"):
         raise RuntimeError("DATABASE_URL must use postgresql+psycopg://")
-    engine = create_engine(database_url, pool_pre_ping=True)
+    engine = create_engine(database_url, pool_pre_ping=True, pool_recycle=1800,
+                           connect_args={"connect_timeout": 5})
     return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 def get_db() -> Generator[Session, None, None]:
@@ -33,4 +34,4 @@ def get_db() -> Generator[Session, None, None]:
         except SQLAlchemyError as exc:
             session.rollback()
             logger.error("Database request failed (%s)", type(exc).__name__)
-            raise HTTPException(status_code=503, detail="Database is unavailable") from None
+            raise HTTPException(status_code=503, detail="Service temporarily unavailable") from None
