@@ -87,6 +87,7 @@ function App() {
   const [chatSearch, setChatSearch] = useState('')
   const [chatBusy, setChatBusy] = useState(false)
   const [chatDrawerOpen, setChatDrawerOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem('gha-theme')
     return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'system'
@@ -152,7 +153,7 @@ function App() {
   function beginAuth(mode: 'login' | 'register') {
     setAuthMode(mode); setError(''); setSuccess(''); setPage(mode)
   }
-  function navigate(next: Page) { setPage(next); setError(''); setSuccess('') }
+  function navigate(next: Page) { setPage(next); setError(''); setSuccess(''); setChatDrawerOpen(false) }
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(''); setSuccess('')
@@ -305,9 +306,9 @@ function App() {
   const patientNav = [
     { key: 'dashboard' as const, label: 'Overview', icon: '⌂' },
     { key: 'assistant' as const, label: 'Health assistant', icon: '✳' },
-    { key: 'history' as const, label: 'My requests', icon: '◷' },
     { key: 'profile' as const, label: 'Profile & settings', icon: '◎' },
   ]
+  const conversationHistory = <div className="chat-history-section"><div className="chat-history-title">CONVERSATIONS</div><button className="button button-primary chat-new-button" onClick={newChat}>＋ New chat</button><label className="chat-search"><span>Search conversations</span><input type="search" value={chatSearch} onChange={(event) => void searchChats(event.target.value)} placeholder="Search titles" /></label><div className="chat-history-list">{chatResults.length === 0 ? <div className="chat-empty"><strong>{chatSearch ? 'No matching conversations' : 'No conversations yet'}</strong><p>{chatSearch ? 'Try a different title.' : 'Your saved messages will appear here.'}</p></div> : ['Today', 'Yesterday', 'Previous days'].map((group) => { const groupItems = chatResults.filter((item) => conversationDateGroup(item.updated_at || item.created_at) === group); return groupItems.length ? <div className="chat-history-group" key={group}><strong>{group}</strong>{groupItems.map((item) => <article className={selectedChat?.id === item.id ? 'chat-history-item selected' : 'chat-history-item'} key={item.id}><button onClick={() => void openChat(item.id)}><strong>{item.title || 'Health conversation'}</strong><small>{item.status === 'pending_review' ? 'Pending review' : 'Reviewed'}</small></button><div><button className="icon-button" aria-label={'Rename ' + item.title} onClick={() => void renameChat(item)}>✎</button><button className="icon-button" aria-label={'Copy ' + item.title} onClick={() => void shareSavedChat(item)}>↗</button><button className="icon-button danger-icon" aria-label={'Delete ' + item.title} onClick={() => void deleteChat(item)}>×</button></div></article>)}</div> : null })}</div></div>
 
   return (
     <div className={user ? 'app-root authenticated' : 'app-root'}>
@@ -315,7 +316,7 @@ function App() {
         <a className="brand" href="#" onClick={(event) => { event.preventDefault(); if (user) navigate(user.role === 'patient' ? 'dashboard' : user.role); else navigate('landing') }} aria-label="Ghana Health Assistant home">
           <span className="brand-mark">+</span><span className="brand-copy"><strong>Ghana Health</strong><small>ASSISTANT</small></span>
         </a>
-        <div className="topbar-right"><label className="theme-control"><span className="sr-only">Color theme</span><select aria-label="Color theme" value={themeMode} onChange={(event) => setThemeMode(event.target.value as ThemeMode)}><option value="system">System theme</option><option value="light">Light theme</option><option value="dark">Dark theme</option></select></label>{user ? <><span className="session-badge"><i /> Secure session</span><span className="user-chip">{user.role === 'patient' ? displayName : user.email}</span><button className="button button-outline button-small" onClick={() => void logout()} disabled={busy}>Sign out</button></> :
+        <div className="topbar-right">{user && <button className="icon-button app-menu-button mobile-only" onClick={() => setChatDrawerOpen(true)} aria-label="Open application navigation">☰</button>}<label className="theme-control"><span className="sr-only">Color theme</span><select aria-label="Color theme" value={themeMode} onChange={(event) => setThemeMode(event.target.value as ThemeMode)}><option value="system">System theme</option><option value="light">Light theme</option><option value="dark">Dark theme</option></select></label>{user ? <><span className="session-badge"><i /> Secure session</span><span className="user-chip">{user.role === 'patient' ? displayName : user.email}</span><button className="button button-outline button-small" onClick={() => void logout()} disabled={busy}>Sign out</button></> :
           page !== 'login' && page !== 'register' && <><button className="button button-quiet" onClick={() => beginAuth('login')}>Sign in</button><button className="button button-primary button-small" onClick={() => beginAuth('register')}>Create account</button></>}
         </div>
       </header>
@@ -355,10 +356,13 @@ function App() {
         </section>
       </main>}
 
-      {user && <div className="workspace">
+      {user && <div className={`workspace ${user.role === 'patient' ? 'chat-workspace' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${chatDrawerOpen ? 'sidebar-open' : ''}`}>
+        {chatDrawerOpen && <button className="app-drawer-backdrop mobile-only" aria-label="Close navigation" onClick={() => setChatDrawerOpen(false)} />}
         <aside className="sidebar">
+          <div className="sidebar-brand"><span className="brand-mark">+</span><strong>Ghana Health</strong><button className="sidebar-collapse" onClick={() => setSidebarCollapsed((collapsed) => !collapsed)} aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>{sidebarCollapsed ? '›' : '‹'}</button></div>
           <div className="sidebar-role"><span className="role-avatar">{user.role === 'patient' ? (displayName[0] || 'P').toUpperCase() : user.role === 'doctor' ? 'C' : 'A'}</span><div><strong>{user.role === 'patient' ? displayName : user.role === 'doctor' ? 'Clinician workspace' : 'Administration'}</strong><small>{user.role === 'doctor' ? 'VERIFIED REVIEWER' : user.role.toUpperCase()}</small></div></div>
-          {user.role === 'patient' && <nav className="side-nav" aria-label="Patient navigation">{patientNav.map((item) => <button key={item.key} className={page === item.key ? 'nav-item active' : 'nav-item'} onClick={() => navigate(item.key)}><span>{item.icon}</span>{item.key === 'history' ? 'Chat history' : item.label}</button>)}</nav>}
+          {user.role === 'patient' && <nav className="side-nav" aria-label="Patient navigation">{patientNav.map((item) => <button key={item.key} className={page === item.key ? 'nav-item active' : 'nav-item'} onClick={() => navigate(item.key)} aria-label={item.label}><span>{item.icon}</span><span className="nav-label">{item.label}</span></button>)}</nav>}
+          {user.role === 'patient' && page === 'assistant' && conversationHistory}
           {user.role === 'doctor' && <nav className="side-nav" aria-label="Clinician navigation"><button className="nav-item active"><span>◷</span>Review workspace</button></nav>}
           {user.role === 'admin' && <nav className="side-nav" aria-label="Administrator navigation"><button className="nav-item active"><span>▦</span>Administration</button></nav>}
           <div className="sidebar-footer"><div className="privacy-mark">◇</div><strong>Your privacy matters</strong><p>Messages are stored in your account and visible to authorized reviewers.</p></div>
@@ -371,7 +375,7 @@ function App() {
             <div className="status-banner"><div className="status-banner-icon">✳</div><div><strong>Messages are available for clinician review</strong><p>Automated health answers are unavailable until reviewed health sources and response safeguards are connected.</p></div><span className="status-tag">HUMAN REVIEW</span></div>
             <div className="stat-grid"><article className="stat-card"><span>YOUR REQUESTS</span><strong>{submissions.length}</strong><small>Saved to your account</small></article><article className="stat-card"><span>PENDING REVIEW</span><strong>{submissions.filter((item) => item.status === 'pending_review').length}</strong><small>Awaiting clinician review</small></article><article className="stat-card"><span>LANGUAGE</span><strong className="stat-language">{languageName(language)}</strong><small>Your current preference</small></article></div>
             <div className="section-heading"><div><span className="eyebrow">YOUR SPACE</span><h2>Get started</h2></div></div>
-            <div className="action-grid"><button className="action-card" onClick={() => navigate('assistant')}><span className="action-icon">✳</span><strong>Health assistant</strong><p>Send a message for clinician review. Automated answers are unavailable.</p><span className="action-arrow">→</span></button><button className="action-card" onClick={() => navigate('history')}><span className="action-icon">◷</span><strong>Chat history</strong><p>Open messages and see clinician review status.</p><span className="action-arrow">→</span></button><button className="action-card" onClick={() => navigate('profile')}><span className="action-icon">◎</span><strong>Profile & settings</strong><p>Update your display name, language, and theme.</p><span className="action-arrow">→</span></button></div>
+            <div className="action-grid"><button className="action-card" onClick={() => navigate('assistant')}><span className="action-icon">✳</span><strong>Health assistant</strong><p>Send a message for clinician review. Automated answers are unavailable.</p><span className="action-arrow">→</span></button><button className="action-card" onClick={() => navigate('assistant')}><span className="action-icon">◷</span><strong>Chat history</strong><p>Open messages and see clinician review status.</p><span className="action-arrow">→</span></button><button className="action-card" onClick={() => navigate('profile')}><span className="action-icon">◎</span><strong>Profile & settings</strong><p>Update your display name, language, and theme.</p><span className="action-arrow">→</span></button></div>
             <div className="medical-notice"><span>i</span><p><strong>Health service notice.</strong> This application is not clinically validated and does not provide diagnosis or treatment.</p></div>
           </section>}
 
@@ -384,12 +388,6 @@ function App() {
             </div>
           </section>}
 
-          {user.role === 'patient' && page === 'history' && <section>
-            <div className="page-heading"><div><span className="eyebrow">PATIENT WORKSPACE</span><h1>Conversation history</h1><p>Messages and clinician review status associated with your account.</p></div><button className="button button-primary" onClick={newChat}>New conversation</button></div>
-            <div className="table-card"><div className="table-header"><div><strong>Conversation history</strong><small>{submissions.length} saved {submissions.length === 1 ? 'request' : 'requests'}</small></div></div>
-              {submissions.length === 0 ? <div className="empty-state"><span>◷</span><strong>No conversations yet</strong><p>Start a conversation to send a message for clinician review.</p></div> : <div className="request-list">{submissions.map((item) => <article className="request-row clickable-row" key={item.id} onClick={() => void openChat(item.id)}><span className="request-symbol">✳</span><div><strong>{item.title}</strong><small>{new Date(item.created_at).toLocaleString()} · {languageName(item.preferred_language)}</small></div><span className={item.status === 'pending_review' ? 'pill pill-waiting' : 'pill pill-done'}>{item.status === 'pending_review' ? 'Pending review' : 'Reviewed'}</span></article>)}</div>}
-            </div><div className="medical-notice"><span>i</span><p>Review status indicates workflow only; it is not a clinical assessment or a reply.</p></div>
-          </section>}
 
           {user.role === 'patient' && page === 'profile' && <section>
             <div className="page-heading"><div><span className="eyebrow">ACCOUNT SETTINGS</span><h1>Your profile</h1><p>Manage the details used to personalize your account.</p></div></div>
