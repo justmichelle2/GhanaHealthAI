@@ -1,0 +1,13 @@
+{
+  "name": "Ghana Health Assistant",
+  "short_name": "Ghana Health",
+  "description": "Multilingual health information with human oversight.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f3f7f5",
+  "theme_color": "#f3f7f5",
+  "icons": [
+    { "src": "/ghana-health-mark.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
