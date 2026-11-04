@@ -355,9 +355,9 @@ button:focus-visible, a:focus-visible {
 
 /* Product interface refresh */
 :root {
-  --ink: #173a3c; --muted: #607778; --teal: #0f6b68; --teal-dark: #084f51;
-  --mint: #dcefeb; --canvas: #f3f7f5; --line: #dce7e4; --white: #fff;
-  --amber: #8d6218; --shadow: 0 14px 36px rgba(24, 61, 59, .08);
+  --ink: #183a38; --muted: #667875; --teal: #087f70; --teal-dark: #06685d;
+  --mint: #dcefeb; --canvas: #f6f8f5; --line: #dce6e1; --white: #fff;
+  --amber: #a15c07; --shadow: 0 14px 36px rgba(24, 58, 56, .08);
   font-family: Inter, "Segoe UI", Arial, sans-serif;
 }
 html { min-width: 320px; background: var(--canvas); }
@@ -394,11 +394,11 @@ button:disabled { opacity: .56; cursor: not-allowed; }
 .eyebrow-mark { width: 18px; height: 2px; background: #64a99d; }
 .landing h1,.auth-aside h1 { margin: 22px 0 17px; color: #183b3b; font-size: clamp(39px, 5vw, 64px); line-height: 1.04; letter-spacing: -3px; }
 .landing h1 em { color: var(--teal); font-style: normal; }
-.landing-lead { max-width: 530px; margin: 0; color: #5d7473; font-size: 16px; line-height: 1.75; }
+.landing-lead { max-width: 530px; margin: 0; color: #526866; font-size: 16px; line-height: 1.75; }
 .landing-actions { display: flex; flex-wrap: wrap; gap: 11px; margin-top: 28px; }
-.landing-actions .button-primary { box-shadow: 0 8px 18px #0f6b6826; }
-.language-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 13px; margin-top: 40px; color: #355552; }
-.language-strip > span { margin-right: 5px; color: #869997; font-size: 9px; font-weight: 750; letter-spacing: 1.2px; }
+.landing-actions .button-primary { box-shadow: 0 8px 18px #087f7026; }
+.language-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 13px; margin-top: 40px; color: #183a38; }
+.language-strip > span { margin-right: 5px; color: #667875; font-size: 9px; font-weight: 750; letter-spacing: 1.2px; }
 .language-strip b { font-size: 11px; font-weight: 650; }
 .landing-visual { min-height: 350px; position: relative; overflow: hidden; padding: 22px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid #d8e8e4; border-radius: 22px; background: #e8f2ef; }
 .landing-visual:before,.landing-visual:after { content: ""; position: absolute; border: 1px solid rgba(31,108,101,.08); border-radius: 50%; }
@@ -641,6 +641,8 @@ html[data-theme='dark'] :focus-visible { outline: 3px solid #5eead4; outline-off
 .chat-message { max-width: min(84%,680px); padding: 12px 14px; border: 1px solid #e3ece8; border-radius: 12px; }
 .patient-message { justify-self: end; background: #eaf4f0; }
 .assistant-message { justify-self: start; background: white; }
+.clinician-message { justify-self: start; background: #e8f5f0; border-color: #b7dcd1; }
+.clinician-message > span { color: var(--teal); font-weight: 700; }
 .chat-message > span { display: block; color: #80918d; font-size: 9px; }
 .chat-message p { margin: 7px 0 0; color: #31544e; font-size: 13px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .assistant-unavailable { max-width: 590px; justify-self: center; padding: 13px 16px; border: 1px solid #e9e1ca; border-radius: 10px; color: #6b5a30; background: #fbf8ed; text-align: center; }

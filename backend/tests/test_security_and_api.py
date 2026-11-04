@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.core.security import hash_password, verify_password
 from app.dependencies import get_current_user, require_role
-from app.models import AuditLog, Conversation, ConversationMessage, ConversationShare, PasswordResetToken, User, UserRole
+from app.models import AuditLog, Conversation, ConversationMessage, ConversationShare, DoctorProfile, PasswordResetToken, User, UserRole
 from app.routers.auth import check_csrf
 from app.schemas import ConversationCreate, RegisterRequest
 import main as api_main
@@ -290,3 +290,31 @@ def test_share_resolution_is_rate_limited_by_client(isolated_application_db):
     for _ in range(30):
         assert client.post("/patient/public/shares/resolve", json={"token": "x" * 43}).status_code == 404
     assert client.post("/patient/public/shares/resolve", json={"token": "x" * 43}).status_code == 429
+
+
+def test_clinician_review_sends_patient_visible_reply_and_keeps_note_internal(isolated_application_db):
+    sessions = isolated_application_db["sessions"]
+    with sessions() as session:
+        doctor = User(email="doctor@example.com", password_hash=hash_password("a-long-doctor-password"), role="doctor", is_active=True)
+        doctor.doctor_profile = DoctorProfile(is_verified=True)
+        session.add(doctor)
+        session.commit()
+        doctor_id = doctor.id
+
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=doctor_id, role="doctor", doctor_profile=SimpleNamespace(is_verified=True))
+    conversation_id = isolated_application_db["conversation_id"]
+    reviewed = client.patch(f"/doctor/conversations/{conversation_id}/review", json={
+        "review_note": "Internal clinical note.",
+        "patient_response": "A clinician reply visible to the patient.",
+    })
+    assert reviewed.status_code == 200
+    assert reviewed.json()["status"] == "reviewed"
+
+    with sessions() as session:
+        conversation = session.get(Conversation, conversation_id)
+        assert conversation.review_note == "Internal clinical note."
+        messages = session.query(ConversationMessage).filter(ConversationMessage.conversation_id == conversation_id).all()
+        reply = [message for message in messages if message.sender_role == "doctor"]
+        assert len(reply) == 1
+        assert reply[0].body == "A clinician reply visible to the patient."
+        assert len(session.query(AuditLog).filter(AuditLog.action == "patient_reply_sent").all()) == 1

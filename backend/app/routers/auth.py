@@ -179,11 +179,20 @@ def register(payload: RegisterRequest, response: Response, csrf_cookie: str | No
     return user
 
 @router.post("/login", response_model=UserResponse)
-def login(payload: LoginRequest, response: Response, csrf_cookie: str | None = Cookie(default=None, alias=CSRF_COOKIE), csrf_header: str | None = Header(default=None, alias="X-CSRF-Token"), db: Session = Depends(get_db)) -> User:
+def login(payload: LoginRequest, request: Request, response: Response, csrf_cookie: str | None = Cookie(default=None, alias=CSRF_COOKIE), csrf_header: str | None = Header(default=None, alias="X-CSRF-Token"), db: Session = Depends(get_db)) -> User:
     check_csrf(csrf_cookie, csrf_header)
-    user = db.scalar(select(User).where(User.email == str(payload.email)))
+    now = datetime.now(timezone.utc)
+    ip = request.client.host if request.client else "unknown"
+    email = str(payload.email).strip().lower()
+    allowed_email = enforce_limit(db, "login-email:" + email, maximum=10, window=timedelta(minutes=10), now=now)
+    allowed_ip = enforce_limit(db, "login-ip:" + ip, maximum=40, window=timedelta(minutes=10), now=now)
+    if not allowed_email or not allowed_ip:
+        db.commit()
+        raise HTTPException(status_code=429, detail="Too many sign-in attempts. Please try again later.")
+    user = db.scalar(select(User).where(User.email == email))
     matches = verify_password(payload.password, user.password_hash if user else DUMMY_PASSWORD_HASH)
     if user is None or not matches or not user.is_active:
+        db.commit()
         raise HTTPException(status_code=401, detail="Invalid email or password")
     set_session(response, user, new_csrf_token())
     db.add(AuditLog(actor_user_id=user.id, action="login", resource_type="user", resource_id=str(user.id)))

@@ -160,6 +160,7 @@ class DoctorReviewItem(BaseModel):
 class DoctorReviewUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     review_note: str = Field(default="", max_length=2000)
+    patient_response: str = Field(default="", max_length=4000)
 
 class DoctorReviewResult(BaseModel):
     model_config = ConfigDict(from_attributes=True)

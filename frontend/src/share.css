@@ -2,6 +2,10 @@
 .modal-card { position: relative; width: min(100%, 560px); max-height: min(90vh, 800px); overflow: auto; padding: 30px; border: 1px solid var(--line, #dbe4df); border-radius: 20px; color: var(--ink, #16342c); background: var(--surface, #fff); box-shadow: 0 24px 90px #061b1455; }
 .modal-card h2 { margin: 8px 0 12px; }
 .modal-card p { line-height: 1.55; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px; }
+.button-danger { min-height: 44px; border: 1px solid var(--danger-solid); border-radius: var(--radius-small); padding: 0 18px; color: var(--danger-contrast); background: var(--danger-solid); font-weight: 700; cursor: pointer; }
+.button-danger:hover { background: var(--danger-solid-hover); }
+.button-danger:disabled { opacity: .55; cursor: not-allowed; }
 .modal-close { position: absolute; top: 12px; right: 14px; border: 0; background: transparent; color: inherit; font-size: 28px; cursor: pointer; }
 .share-permission { padding: 11px 14px; border-radius: 10px; background: var(--soft, #f2f6f3); }
 .share-confirm { display: flex; align-items: flex-start; gap: 9px; margin: 16px 0; }
@@ -21,6 +25,7 @@
 .topbar-right .theme-control:last-of-type select { min-width: 90px; }
 @media (max-width: 640px) {
   .modal-card { padding: 24px 18px; }
+  .dialog-actions { flex-wrap: wrap; }
   .share-link-row { align-items: flex-start; }
   .topbar-right .theme-control:last-of-type select { min-width: 60px; max-width: 66px; }
 }

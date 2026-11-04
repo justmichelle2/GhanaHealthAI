@@ -295,27 +295,36 @@ html[data-theme='dark'] textarea:focus-visible { outline: 3px solid var(--dark-t
 /* Shared light and dark design tokens and the final responsive shell. */
 :root {
   color-scheme: light;
-  --page-bg: #f4f7f8;
+  --page-bg: #f6f8f5;
   --surface: #ffffff;
-  --surface-raised: #f8fafc;
-  --border: #d8e1e6;
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #5f6b7b;
-  --accent: #0f766e;
-  --accent-hover: #115e59;
+  --surface-raised: #f9fbf8;
+  --border: #dce6e1;
+  --text-primary: #183a38;
+  --text-secondary: #526866;
+  --text-muted: #667875;
+  --accent: #087f70;
+  --accent-hover: #06685d;
   --accent-contrast: #ffffff;
-  --warning-surface: #fffbeb;
-  --warning-text: #713f12;
-  --danger: #b91c1c;
-  --success: #166534;
-  --focus-ring: #0f766e;
+  --warning-surface: #fff7e8;
+  --warning-text: #a15c07;
+  --danger: #b42318;
+  --danger-solid: #b42318;
+  --danger-solid-hover: #8f1d15;
+  --danger-contrast: #ffffff;
+  --success: #16794a;
+  --focus-ring: #087f70;
   --secondary-surface: #ffffff;
-  --secondary-hover: #f8fafc;
-  --secondary-text: #0f172a;
-  --surface-shadow: 0 12px 30px rgb(15 23 42 / 6%);
+  --secondary-hover: #f0f5f2;
+  --secondary-text: #183a38;
+  --surface-shadow: 0 12px 30px rgb(24 58 56 / 6%);
   --container-width: 1440px;
   --container-gutter: clamp(16px, 4vw, 64px);
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
+  --space-12: 48px; --space-16: 64px;
+  --font-body: 16px; --font-small: 14px; --font-label: 15px;
+  --line-body: 1.6; --radius-small: 8px; --radius-medium: 12px; --radius-large: 16px;
+  --control-height: 44px; --transition-fast: 150ms ease;
   font-family: Inter, 'Segoe UI', Arial, sans-serif;
   color: var(--text-primary);
   background: var(--page-bg);
@@ -335,6 +344,9 @@ html[data-theme='dark'] {
   --warning-surface: #332c1e;
   --warning-text: #ffe9b2;
   --danger: #fecaca;
+  --danger-solid: #7f1d1d;
+  --danger-solid-hover: #991b1b;
+  --danger-contrast: #ffffff;
   --success: #bbf7d0;
   --focus-ring: #5eead4;
   --surface-shadow: 0 16px 38px rgb(0 0 0 / 20%);
@@ -351,6 +363,14 @@ button, a, input, select, textarea { accent-color: var(--accent); }
   padding-inline: max(var(--container-gutter), calc((100vw - var(--container-width)) / 2));
   background: var(--surface);
   border-color: var(--border);
+}
+.public-nav { display: flex; align-items: center; gap: var(--space-6); }
+.public-nav a { color: var(--text-secondary); font-size: var(--font-small); font-weight: 600; text-decoration: none; }
+.public-nav a:hover { color: var(--accent); }
+.translation-coverage {
+  width: min(var(--container-width), calc(100% - clamp(32px, 8vw, 128px)));
+  margin: 10px auto 0; padding: 10px 14px; border: 1px solid var(--border);
+  border-radius: var(--radius-small); color: var(--text-secondary); background: var(--surface-raised); font-size: var(--font-small);
 }
 .landing, .auth-layout, .footer {
   width: min(var(--container-width), calc(100% - clamp(32px, 8vw, 128px)));
@@ -372,6 +392,24 @@ button, a, input, select, textarea { accent-color: var(--accent); }
 }
 .landing h1 em, .brand-name span { color: var(--accent); }
 html[data-theme='dark'] .landing h1 em { color: var(--accent); }
+.landing > .public-content-section, .landing > .public-cta { grid-column: 1 / -1; }
+.public-content-section { padding: clamp(22px, 4vw, 48px) 0; border-top: 1px solid var(--border); }
+.public-content-section h2, .public-cta h2 { margin: 0 0 var(--space-4); font-size: clamp(1.5rem, 2.5vw, 2rem); line-height: 1.2; }
+.public-content-section p { max-width: 72ch; color: var(--text-secondary); line-height: var(--line-body); }
+.how-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-6); }
+.how-grid article { padding-right: var(--space-5); }
+.how-grid h3 { margin: 0 0 var(--space-2); font-size: 1.1rem; }
+.how-grid p { margin: 0; }
+.public-privacy { background: var(--surface-raised); padding: var(--space-8); border: 1px solid var(--border); border-radius: var(--radius-medium); }
+.public-faq details, .data-handling { border-bottom: 1px solid var(--border); padding: var(--space-4) 0; }
+.public-faq summary, .data-handling summary { cursor: pointer; font-weight: 650; }
+.public-faq details p, .data-handling p { margin: var(--space-3) 0 0; }
+.public-cta { display: flex; align-items: center; justify-content: space-between; gap: var(--space-6); padding: var(--space-8); background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-medium); }
+.public-cta h2, .public-cta p { margin: 0; }
+.public-cta p { color: var(--text-secondary); }
+.data-handling { font-size: var(--font-small); }
+.registration-acknowledgement { margin-block: var(--space-2); align-items: flex-start; }
+.registration-acknowledgement input { margin-top: 3px; }
 .landing-lead, .auth-aside > p, .panel-lead, .page-heading p,
 .chat-page-heading p, .section-heading p, .shared-card > p { color: var(--text-secondary); }
 .landing-visual { min-height: clamp(360px, 40vw, 560px); background: var(--surface-raised); border-color: var(--border); box-shadow: var(--surface-shadow); }
@@ -501,6 +539,8 @@ html[data-theme='dark'] .button-outline, html[data-theme='dark'] .secondary-butt
 .chat-layout .chat-message > span { color: var(--text-muted); font-size: 13px; }
 .chat-layout .patient-message { justify-self: end; background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
 .chat-layout .assistant-message { justify-self: start; background: var(--surface-raised); }
+.chat-layout .clinician-message { justify-self: start; background: color-mix(in srgb, var(--accent) 7%, var(--surface)); border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+.chat-layout .clinician-message > span { color: var(--accent); font-weight: 700; }
 .chat-layout .chat-composer { grid-template-columns: minmax(0, 1fr) 44px 92px; gap: 10px; padding: 14px 18px 8px; align-items: end; background: var(--surface); border-color: var(--border); }
 .chat-layout .chat-composer textarea { width: 100%; min-width: 0; min-height: 64px; max-height: 184px; padding: 12px 14px; resize: none; overflow-y: hidden; font-size: 16px; line-height: 1.45; }
 .chat-layout .chat-composer .mic-button { width: 44px; height: 44px; flex: 0 0 44px; align-self: end; }
@@ -531,6 +571,12 @@ html[data-theme='dark'] .button-outline, html[data-theme='dark'] .secondary-butt
 
 /* Touch layout: application navigation becomes a full-label drawer. */
 @media (max-width: 768px) {
+  .public-nav { display: none; }
+  .landing > .public-content-section, .landing > .public-cta { grid-column: 1; }
+  .how-grid { grid-template-columns: 1fr; gap: var(--space-4); }
+  .how-grid article { padding: 0; }
+  .public-privacy, .public-cta { padding: var(--space-5); }
+  .public-cta { align-items: flex-start; flex-direction: column; }
   .app-root.authenticated { height: 100dvh; }
   .app-root.authenticated > .topbar { flex-basis: 64px; min-height: 64px; padding-inline: 12px; }
   .app-root.authenticated > .workspace { position: relative; display: block; height: calc(100dvh - 64px); }

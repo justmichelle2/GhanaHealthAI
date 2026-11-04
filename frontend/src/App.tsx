@@ -15,23 +15,29 @@ type Overview = { users: number; patients: number; doctors_pending_verification:
 type ThemeMode = 'system' | 'light' | 'dark'
 type ShareLink = { id: string; created_at: string; expires_at: string; revoked_at: string | null; active: boolean }
 type PublicConversation = { preferred_language: string; created_at: string; messages: { sender_role: string; body: string; created_at: string }[] }
+type ApiErrorCode = 'network' | 'invalid' | 'duplicate' | 'unavailable' | 'credentials' | 'generic'
 
 const API = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
 const LANGUAGES = [{ value: 'en', label: 'English' }, { value: 'tw', label: 'Twi' }, { value: 'ee', label: 'Ewe' }, { value: 'gaa', label: 'Ga' }, { value: 'ha', label: 'Hausa' }]
+const errorKeys: Record<ApiErrorCode, TranslationKey> = {
+  network: 'networkUnavailable', invalid: 'invalidForm', duplicate: 'duplicateAccount',
+  unavailable: 'serviceTemporarilyUnavailable', credentials: 'errorCredentials', generic: 'errorGeneric',
+}
 
 class ApiError extends Error {
   status: number
-  constructor(message: string, status: number) { super(message); this.status = status }
+  code: ApiErrorCode
+  constructor(status: number, code: ApiErrorCode) { super(code); this.status = status; this.code = code }
 }
 
-function conversationDateGroup(value: string) {
+function conversationDateGroup(value: string): 'today' | 'yesterday' | 'previous' {
   const today = new Date()
   const date = new Date(value)
   const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()
   const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
-  if (startOfDate === startOfToday) return 'Today'
-  if (startOfDate === startOfToday - 86400000) return 'Yesterday'
-  return 'Previous days'
+  if (startOfDate === startOfToday) return 'today'
+  if (startOfDate === startOfToday - 86400000) return 'yesterday'
+  return 'previous'
 }
 
 function csrfCookie() {
@@ -47,16 +53,17 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && csrf) headers.set('X-CSRF-Token', csrf)
   let response: Response
   try { response = await fetch(API + path, { ...options, method, headers, credentials: 'include' }) }
-  catch { throw new ApiError('The API cannot be reached. Check that the backend is running.', 0) }
+  catch { throw new ApiError(0, 'network') }
   const body = response.status === 204 ? null : await response.json().catch(() => null) as { detail?: string | { msg?: string }[] } | null
   if (!response.ok) {
     const detail = body?.detail
-    let message = typeof detail === 'string' ? detail : 'The request could not be completed.'
-    if (Array.isArray(detail)) message = detail.map((item) => item.msg || 'Invalid value').join(' ')
-    if (response.status === 503 && /database|service temporarily unavailable/i.test(message)) message = "We can't sign you in right now. Please try again shortly."
-    if (response.status === 422 && !Array.isArray(detail)) message = 'Check the information you entered.'
-    if (response.status === 409 && /already exists/i.test(message)) message = 'An account with this email already exists. Sign in instead.'
-    throw new ApiError(message, response.status)
+    const detailText = typeof detail === 'string' ? detail : ''
+    let code: ApiErrorCode = 'generic'
+    if (response.status === 422) code = 'invalid'
+    else if (response.status === 409 && /already exists/i.test(detailText)) code = 'duplicate'
+    else if (response.status === 503 || response.status >= 500) code = 'unavailable'
+    else if (response.status === 401) code = 'credentials'
+    throw new ApiError(response.status, code)
   }
   return body as T
 }
@@ -77,6 +84,7 @@ function App() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [registrationAcknowledged, setRegistrationAcknowledged] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [language, setLanguage] = useState('en')
   const [interfaceLanguage, setInterfaceLanguage] = useState<InterfaceLanguage>(() => loadInterfaceLanguage(localStorage))
@@ -85,6 +93,7 @@ function App() {
   const [resetPassword, setResetPassword] = useState('')
   const [resetConfirmPassword, setResetConfirmPassword] = useState('')
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
+  const [conversationDialog, setConversationDialog] = useState<{ kind: 'rename' | 'delete'; conversation: Conversation; title: string } | null>(null)
   const [shareExpiry, setShareExpiry] = useState<1 | 24 | 168>(24)
   const [shareConfirmed, setShareConfirmed] = useState(false)
   const [shareToken, setShareToken] = useState('')
@@ -95,6 +104,7 @@ function App() {
   const [busy, setBusy] = useState(false)
   const [reviewing, setReviewing] = useState('')
   const [notes, setNotes] = useState<Record<string, string>>({})
+  const [replies, setReplies] = useState<Record<string, string>>({})
   const [messageDraft, setMessageDraft] = useState('')
   const [storeConsent, setStoreConsent] = useState(false)
   const [sendingRequest, setSendingRequest] = useState(false)
@@ -109,6 +119,10 @@ function App() {
   })
   const chatBodyRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
+  const conversationDialogOpener = useRef<HTMLButtonElement | null>(null)
+  const conversationDialogRef = useRef<HTMLElement>(null)
+  const shareDialogOpener = useRef<HTMLElement | null>(null)
+  const shareDialogRef = useRef<HTMLElement>(null)
   const bootHashRef = useRef(window.location.hash)
 
   useEffect(() => {
@@ -122,6 +136,44 @@ function App() {
     input.style.height = `${Math.min(input.scrollHeight, 184)}px`
     input.style.overflowY = input.scrollHeight > 184 ? 'auto' : 'hidden'
   }, [messageDraft])
+
+  useEffect(() => {
+    if (!conversationDialog) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setConversationDialog(null)
+        conversationDialogOpener.current?.focus()
+      }
+      if (event.key === 'Tab' && conversationDialogRef.current) {
+        const controls = [...conversationDialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled])')]
+        if (controls.length < 2) return
+        const first = controls[0], last = controls[controls.length - 1]
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [conversationDialog])
+
+  useEffect(() => {
+    if (!shareDialogOpen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShareDialogOpen(false); setShareToken(''); setShareConfirmed(false)
+        window.setTimeout(() => shareDialogOpener.current?.focus(), 0)
+      }
+      if (event.key === 'Tab' && shareDialogRef.current) {
+        const controls = [...shareDialogRef.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])')]
+        if (controls.length < 2) return
+        const first = controls[0], last = controls[controls.length - 1]
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [shareDialogOpen])
 
   useEffect(() => {
     localStorage.setItem('gha-theme', themeMode)
@@ -151,6 +203,17 @@ function App() {
   }, [page])
 
   const t = (key: TranslationKey) => translate(interfaceLanguage, key)
+
+  function describeError(reason: unknown, fallback: TranslationKey) {
+    if (reason instanceof ApiError) return t(errorKeys[reason.code])
+    if (reason instanceof Error && reason.message) return reason.message
+    return t(fallback)
+  }
+
+  function closeShareDialog() {
+    setShareDialogOpen(false); setShareToken(''); setShareConfirmed(false)
+    window.setTimeout(() => shareDialogOpener.current?.focus(), 0)
+  }
 
   async function loadWorkspace(account: User) {
     setUser(account); setError('')
@@ -192,7 +255,7 @@ function App() {
           const conversation = await request<PublicConversation>('/patient/public/shares/resolve', { method: 'POST', body: JSON.stringify({ token }) })
           if (active) setPublicConversation(conversation)
         } catch {
-          if (active) setError('This link is unavailable or has expired.')
+          if (active) setError(t('unavailable'))
         }
         return
       }
@@ -203,15 +266,17 @@ function App() {
       } catch (reason) {
         if (!active) return
         if (reason instanceof ApiError && reason.status === 401) setPage('landing')
-        else { setError(reason instanceof Error ? reason.message : 'Unable to connect.'); setPage('unavailable') }
+        else { setError(describeError(reason, 'accountUnavailability')); setPage('unavailable') }
       }
     }
     void restore()
     return () => { active = false }
+    // The boot restore intentionally runs once; language changes must not re-run session restoration.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function beginAuth(mode: 'login' | 'register') {
-    setAuthMode(mode); setError(''); setSuccess(''); setPage(mode)
+    setAuthMode(mode); setRegistrationAcknowledged(false); setError(''); setSuccess(''); setPage(mode)
   }
   function navigate(next: Page) { setPage(next); setError(''); setSuccess(''); setChatDrawerOpen(false) }
 
@@ -219,26 +284,27 @@ function App() {
     event.preventDefault(); setError(''); setSuccess(''); setBusy(true)
     try {
       await request<void>('/auth/csrf')
-      const result = await request<{ message: string }>('/auth/password-reset/request', { method: 'POST', body: JSON.stringify({ email: resetEmail.trim() }) })
-      setSuccess(result.message)
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to request a reset link.') }
+      await request<{ message: string }>('/auth/password-reset/request', { method: 'POST', body: JSON.stringify({ email: resetEmail.trim() }) })
+      setSuccess(t('resetEmailSent'))
+    } catch (reason) { setError(describeError(reason, 'unableRequestReset')) }
     finally { setBusy(false) }
   }
 
   async function submitPasswordReset(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(''); setSuccess('')
-    if (resetPassword !== resetConfirmPassword) { setError('Your passwords do not match.'); return }
+    if (resetPassword !== resetConfirmPassword) { setError(t('passwordMismatch')); return }
     setBusy(true)
     try {
-      const result = await request<{ message: string }>('/auth/password-reset/confirm', { method: 'POST', body: JSON.stringify({ token: resetToken, password: resetPassword }) })
-      setSuccess(result.message); setResetToken(''); setResetPassword(''); setResetConfirmPassword('')
-    } catch (reason) { setError(reason instanceof Error ? reason.message : t('resetUnavailable')) }
+      await request<{ message: string }>('/auth/password-reset/confirm', { method: 'POST', body: JSON.stringify({ token: resetToken, password: resetPassword }) })
+      setSuccess(t('passwordChanged')); setResetToken(''); setResetPassword(''); setResetConfirmPassword('')
+    } catch (reason) { setError(describeError(reason, 'resetUnavailable')) }
     finally { setBusy(false) }
   }
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(''); setSuccess('')
-    if (authMode === 'register' && password !== confirmPassword) { setError('Your passwords do not match.'); return }
+    if (authMode === 'register' && !registrationAcknowledged) { setError(t('invalidForm')); return }
+    if (authMode === 'register' && password !== confirmPassword) { setError(t('passwordMismatch')); return }
     setBusy(true)
     try {
       const route = authMode === 'register' ? '/auth/register' : '/auth/login'
@@ -247,7 +313,7 @@ function App() {
         : { email: email.trim(), password }
       const account = await request<User>(route, { method: 'POST', body: JSON.stringify(body) })
       setPassword(''); setConfirmPassword(''); await loadWorkspace(account)
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to sign in.') }
+    } catch (reason) { setError(describeError(reason, 'unableSignIn')) }
     finally { setBusy(false) }
   }
 
@@ -257,7 +323,7 @@ function App() {
       await request<void>('/auth/logout', { method: 'POST' })
       setUser(null); setPassword(''); setConfirmPassword(''); setSuccess(''); setSelectedChat(null)
       await request<void>('/auth/csrf'); setPage('landing')
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to sign out.') }
+    } catch (reason) { setError(describeError(reason, 'unableSignOut')) }
     finally { setBusy(false) }
   }
 
@@ -267,8 +333,8 @@ function App() {
       const saved = await request<Profile>('/patient/profile', {
         method: 'PATCH', body: JSON.stringify({ full_name: fullName.trim(), preferred_language: language }),
       })
-      setProfile(saved); setSuccess('Your profile has been updated.')
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to save profile.') }
+      setProfile(saved); setSuccess(t('profileUpdated'))
+    } catch (reason) { setError(describeError(reason, 'unableSaveProfile')) }
     finally { setBusy(false) }
   }
 
@@ -277,60 +343,64 @@ function App() {
     try {
       setSelectedChat(await request<ConversationDetail>('/patient/conversations/' + id))
       setPage('assistant'); setChatDrawerOpen(false)
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to open conversation.') }
+    } catch (reason) { setError(describeError(reason, 'unableOpenConversation')) }
     finally { setChatBusy(false) }
   }
 
   function newChat() { setSelectedChat(null); setMessageDraft(''); setStoreConsent(false); setPage('assistant'); setChatDrawerOpen(false); setError(''); setSuccess('') }
 
   async function sendChatMessage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setError(''); setSuccess(''); setSendingRequest(true)
+    event.preventDefault(); setError(''); setSuccess('')
+    if (!storeConsent) { setError(t('consentRequired')); return }
+    const message = messageDraft.trim()
+    if (message.length < 5) { setError(t('invalidForm')); return }
+    setSendingRequest(true)
     try {
-      const payload = { message: messageDraft.trim(), preferred_language: language, consent_to_store: true }
       const saved = selectedChat
-        ? await request<ConversationDetail>('/patient/conversations/' + selectedChat.id + '/messages', { method: 'POST', body: JSON.stringify({ message: payload.message, consent_to_store: true }) })
-        : await request<ConversationDetail>('/patient/conversations', { method: 'POST', body: JSON.stringify(payload) }).then((item) => request<ConversationDetail>('/patient/conversations/' + item.id))
+        ? await request<ConversationDetail>('/patient/conversations/' + selectedChat.id + '/messages', { method: 'POST', body: JSON.stringify({ message, consent_to_store: true }) })
+        : await request<ConversationDetail>('/patient/conversations', { method: 'POST', body: JSON.stringify({ message, preferred_language: language, consent_to_store: true }) }).then((item) => request<ConversationDetail>('/patient/conversations/' + item.id))
       setSelectedChat(saved)
       setSubmissions((items) => [saved, ...items.filter((item) => item.id !== saved.id)])
       setChatResults((items) => [saved, ...items.filter((item) => item.id !== saved.id)])
       setMessageDraft(''); setStoreConsent(false)
-      setSuccess('Saved for clinician review. No automated health answer is available yet.')
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to save this message.') }
+      setSuccess(t('messagesSaved'))
+    } catch (reason) { setError(describeError(reason, 'unableSaveMessage')) }
     finally { setSendingRequest(false) }
   }
 
   async function searchChats(value: string) {
     setChatSearch(value)
     try { setChatResults(await request<Conversation[]>('/patient/conversations' + (value.trim() ? '?search=' + encodeURIComponent(value.trim()) : ''))) }
-    catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to search conversations.') }
+    catch (reason) { setError(describeError(reason, 'unableSearchConversations')) }
   }
 
-  async function renameChat(item: Conversation) {
-    const title = window.prompt('Conversation title', item.title)
-    if (title === null || !title.trim()) return
+  async function renameChat(item: Conversation, title: string) {
+    if (!title.trim()) return
     try {
       const updated = await request<Conversation>('/patient/conversations/' + item.id, { method: 'PATCH', body: JSON.stringify({ title }) })
       setSubmissions((items) => items.map((entry) => entry.id === item.id ? updated : entry))
       setChatResults((items) => items.map((entry) => entry.id === item.id ? updated : entry))
       setSelectedChat((chat) => chat?.id === item.id ? { ...chat, title: updated.title } : chat)
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to rename conversation.') }
+      setConversationDialog(null)
+    } catch (reason) { setError(describeError(reason, 'unableRenameConversation')) }
   }
 
   async function deleteChat(item: Conversation) {
-    if (!window.confirm('Delete this conversation and its stored messages? This cannot be undone.')) return
     try {
       await request<void>('/patient/conversations/' + item.id, { method: 'DELETE' })
       setSubmissions((items) => items.filter((entry) => entry.id !== item.id))
       setChatResults((items) => items.filter((entry) => entry.id !== item.id))
       if (selectedChat?.id === item.id) setSelectedChat(null)
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to delete conversation.') }
+      setConversationDialog(null)
+    } catch (reason) { setError(describeError(reason, 'unableDeleteConversation')) }
   }
 
   async function openShareDialog(chat: ConversationDetail | null) {
-    if (!chat) { setError('Open a saved conversation before sharing it.'); return }
+    if (!chat) { setError(t('openBeforeSharing')); return }
+    shareDialogOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setSelectedChat(chat); setShareToken(''); setShareConfirmed(false); setShareDialogOpen(true)
     try { setShareLinks(await request<ShareLink[]>('/patient/conversations/' + chat.id + '/shares')) }
-    catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to load share links.') }
+    catch (reason) { setError(describeError(reason, 'unableLoadShares')) }
   }
 
   async function shareChat(chat: ConversationDetail | null) {
@@ -346,14 +416,14 @@ function App() {
       })
       setShareToken(window.location.origin + window.location.pathname + '#share/' + created.token)
       setShareLinks(await request<ShareLink[]>('/patient/conversations/' + selectedChat.id + '/shares'))
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to create a share link.') }
+    } catch (reason) { setError(describeError(reason, 'unableCreateShare')) }
     finally { setBusy(false) }
   }
 
   async function copyShareLink() {
     if (!shareToken) return
-    try { await navigator.clipboard.writeText(shareToken); setSuccess('Share link copied. Anyone who receives it can view this conversation until it expires or is revoked.') }
-    catch { setError('Clipboard access is unavailable. You can select and copy the link.') }
+    try { await navigator.clipboard.writeText(shareToken); setSuccess(t('shareCopied')) }
+    catch { setError(t('clipboardUnavailable')) }
   }
 
   async function revokeShareLink(shareId: string) {
@@ -362,28 +432,32 @@ function App() {
     try {
       await request<void>('/patient/conversations/' + selectedChat.id + '/shares/' + shareId, { method: 'DELETE' })
       setShareLinks(await request<ShareLink[]>('/patient/conversations/' + selectedChat.id + '/shares'))
-      setSuccess('Share link revoked.')
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to revoke this link.') }
+      setSuccess(t('shareRevoked'))
+    } catch (reason) { setError(describeError(reason, 'unableRevokeShare')) }
     finally { setBusy(false) }
   }
 
   async function shareSavedChat(item: Conversation) {
     try { await openShareDialog(await request<ConversationDetail>('/patient/conversations/' + item.id)) }
-    catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to load conversation for sharing.') }
+    catch (reason) { setError(describeError(reason, 'unableLoadShare')) }
   }
 
   async function reviewRequest(item: Review) {
     setError(''); setReviewing(item.id)
+    const patientResponse = (replies[item.id] || '').trim()
     try {
       await request('/doctor/conversations/' + item.id + '/review', {
-        method: 'PATCH', body: JSON.stringify({ review_note: notes[item.id] || '' }),
+        method: 'PATCH', body: JSON.stringify({ review_note: notes[item.id] || '', patient_response: patientResponse }),
       })
       const [queue, done] = await Promise.all([
         request<Review[]>('/doctor/conversations?status=pending_review'),
         request<Review[]>('/doctor/conversations?status=reviewed'),
       ])
-      setPending(queue); setCompleted(done); setSuccess('Review recorded. No reply was sent to the patient.')
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to save review.') }
+      setPending(queue); setCompleted(done)
+      setNotes((previous) => ({ ...previous, [item.id]: '' }))
+      setReplies((previous) => ({ ...previous, [item.id]: '' }))
+      setSuccess(patientResponse ? t('reviewRecordedWithReply') : t('reviewRecordedNoReply'))
+    } catch (reason) { setError(describeError(reason, 'unableSaveReview')) }
     finally { setReviewing('') }
   }
 
@@ -395,8 +469,8 @@ function App() {
   }
   async function verifyDoctor(id: string) {
     setError(''); setBusy(true)
-    try { await request('/admin/doctors/' + id + '/verify', { method: 'POST' }); await reloadAdmin(); setSuccess('Clinician verification recorded.') }
-    catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to verify account.') }
+    try { await request('/admin/doctors/' + id + '/verify', { method: 'POST' }); await reloadAdmin(); setSuccess(t('verifyClinician')) }
+    catch (reason) { setError(describeError(reason, 'unableVerifyAccount')) }
     finally { setBusy(false) }
   }
   async function toggleUser(account: AdminUser) {
@@ -404,7 +478,7 @@ function App() {
     try {
       await request('/admin/users/' + account.id + '/status', { method: 'PATCH', body: JSON.stringify({ is_active: !account.is_active }) })
       await reloadAdmin()
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to update account.') }
+    } catch (reason) { setError(describeError(reason, 'unableUpdateAccount')) }
     finally { setBusy(false) }
   }
   async function retry() {
@@ -412,137 +486,487 @@ function App() {
     try { await request<void>('/auth/csrf'); await loadWorkspace(await request<User>('/auth/me')) }
     catch (reason) {
       if (reason instanceof ApiError && reason.status === 401) setPage('landing')
-      else { setError(reason instanceof Error ? reason.message : 'Unable to connect.'); setPage('unavailable') }
+      else { setError(describeError(reason, 'accountUnavailability')); setPage('unavailable') }
     }
   }
 
   const languageName = (value: string) => LANGUAGES.find((item) => item.value === value)?.label || value.toUpperCase()
   const displayName = profile.full_name || user?.email.split('@')[0] || 'there'
+  const roleName = user ? (user.role === 'patient' ? t('patient') : user.role === 'doctor' ? t('clinician') : t('adminRole')) : ''
   const patientNav = [
-    { key: 'dashboard' as const, label: 'Overview', icon: '⌂' },
-    { key: 'assistant' as const, label: 'Health assistant', icon: '✳' },
-    { key: 'profile' as const, label: 'Profile & settings', icon: '◎' },
+    { key: 'dashboard' as const, label: t('overviewNav'), icon: '⌂' },
+    { key: 'assistant' as const, label: t('healthAssistant'), icon: '✳' },
+    { key: 'profile' as const, label: t('profileAndSettings'), icon: '◎' },
   ]
-  const conversationHistory = <div className="chat-history-section"><div className="chat-history-title">CONVERSATIONS</div><button className="button button-primary chat-new-button" onClick={newChat}>＋ New chat</button><label className="chat-search"><span>Search conversations</span><input type="search" value={chatSearch} onChange={(event) => void searchChats(event.target.value)} placeholder="Search titles" /></label><div className="chat-history-list">{chatResults.length === 0 ? <div className="chat-empty"><strong>{chatSearch ? 'No matching conversations' : 'No conversations yet'}</strong><p>{chatSearch ? 'Try a different title.' : 'Your saved messages will appear here.'}</p></div> : ['Today', 'Yesterday', 'Previous days'].map((group) => { const groupItems = chatResults.filter((item) => conversationDateGroup(item.updated_at || item.created_at) === group); return groupItems.length ? <div className="chat-history-group" key={group}><strong>{group}</strong>{groupItems.map((item) => <article className={selectedChat?.id === item.id ? 'chat-history-item selected' : 'chat-history-item'} key={item.id}><button onClick={() => void openChat(item.id)}><strong>{item.title || 'Health conversation'}</strong><small>{item.status === 'pending_review' ? 'Pending review' : 'Reviewed'}</small></button><div><button className="icon-button" aria-label={'Rename ' + item.title} onClick={() => void renameChat(item)}>✎</button><button className="icon-button" aria-label={'Copy ' + item.title} onClick={() => void shareSavedChat(item)}>↗</button><button className="icon-button danger-icon" aria-label={'Delete ' + item.title} onClick={() => void deleteChat(item)}>×</button></div></article>)}</div> : null })}</div></div>
+  const conversationGroups: { key: 'today' | 'yesterday' | 'previous'; label: string }[] = [
+    { key: 'today', label: t('today') },
+    { key: 'yesterday', label: t('yesterday') },
+    { key: 'previous', label: t('previousDays') },
+  ]
+  const conversationHistory = <div className="chat-history-section">
+    <div className="chat-history-title">{t('conversations')}</div>
+    <button className="button button-primary chat-new-button" onClick={newChat}>＋ {t('newChat')}</button>
+    <label className="chat-search">
+      <span>{t('searchConversations')}</span>
+      <input type="search" value={chatSearch} onChange={(event) => void searchChats(event.target.value)} placeholder={t('searchTitles')} />
+    </label>
+    <div className="chat-history-list">{chatResults.length === 0 ? <div className="chat-empty">
+      <strong>{chatSearch ? t('noMatchingConversations') : t('noConversations')}</strong>
+      <p>{chatSearch ? t('tryDifferentTitle') : t('savedMessagesAppear')}</p>
+    </div> : conversationGroups.map((group) => {
+      const groupItems = chatResults.filter((item) => conversationDateGroup(item.updated_at || item.created_at) === group.key)
+      return groupItems.length ? <div className="chat-history-group" key={group.key}>
+        <strong>{group.label}</strong>{groupItems.map((item) => <article className={selectedChat?.id === item.id ? 'chat-history-item selected' : 'chat-history-item'} key={item.id}>
+          <button onClick={() => void openChat(item.id)}>
+            <strong>{item.title || t('healthConversation')}</strong>
+            <small>{item.status === 'pending_review' ? t('pending') : t('reviewed')}</small>
+          </button>
+          <div>
+            <button className="icon-button" aria-label={`${t('rename')} ${item.title}`} onClick={(event) => { conversationDialogOpener.current = event.currentTarget; setConversationDialog({ kind: 'rename', conversation: item, title: item.title }) }}>✎</button>
+            <button className="icon-button" aria-label={`${t('shareConversation')} ${item.title}`} onClick={() => void shareSavedChat(item)}>↗</button>
+            <button className="icon-button danger-icon" aria-label={`${t('delete')} ${item.title}`} onClick={(event) => { conversationDialogOpener.current = event.currentTarget; setConversationDialog({ kind: 'delete', conversation: item, title: item.title }) }}>×</button>
+          </div>
+        </article>)}</div> : null
+    })}</div>
+    <div className="chat-sidebar-note">{t('yourConversationsPrivate')}</div>
+  </div>
 
   return (
     <div className={user ? 'app-root authenticated' : 'app-root'}>
       <header className="topbar">
-        <a className="brand" href="#" onClick={(event) => { event.preventDefault(); if (user) navigate(user.role === 'patient' ? 'dashboard' : user.role); else navigate('landing') }} aria-label="Ghana Health Assistant home">
-          <span className="brand-mark">+</span><span className="brand-copy"><strong>Ghana Health</strong><small>ASSISTANT</small></span>
+        <a className="brand" href="#" onClick={(event) => { event.preventDefault(); if (user) navigate(user.role === 'patient' ? 'dashboard' : user.role); else navigate('landing') }} aria-label={t('brandHome')}>
+          <span className="brand-mark">+</span>
+          <span className="brand-copy">
+            <strong>Ghana Health</strong>
+            <small className="brand-copy-sub">ASSISTANT</small>
+          </span>
         </a>
-        <div className="topbar-right">{user && <button className="icon-button app-menu-button mobile-only" onClick={() => setChatDrawerOpen(true)} aria-label="Open application navigation">☰</button>}<label className="theme-control"><span className="sr-only">Color theme</span><select aria-label="Color theme" value={themeMode} onChange={(event) => setThemeMode(event.target.value as ThemeMode)}><option value="system">System theme</option><option value="light">Light theme</option><option value="dark">Dark theme</option></select></label><label className="theme-control"><span className="sr-only">{t('languageLabel')}</span><select aria-label={t('languageLabel')} value={interfaceLanguage} onChange={(event) => setInterfaceLanguage(event.target.value as InterfaceLanguage)}>{LANGUAGES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>{user ? <><span className="session-badge"><i /> Secure session</span><span className="user-chip">{user.role === 'patient' ? displayName : user.email}</span><button className="button button-outline button-small" onClick={() => void logout()} disabled={busy}>Sign out</button></> :
-          !['login', 'register', 'forgot', 'reset', 'shared'].includes(page) && <><button className="button button-quiet" onClick={() => beginAuth('login')}>{t('signIn')}</button><button className="button button-primary button-small" onClick={() => beginAuth('register')}>{t('createAccount')}</button></>}
+        <div className="topbar-right">{!user && page === 'landing' && <nav className="public-nav" aria-label={t('mainNavigation')}>
+          <a href="#about">{t('publicAbout')}</a>
+          <a href="#how-it-works">{t('publicHow')}</a>
+          <a href="#languages">{t('publicLanguages')}</a>
+        </nav>}{user && <button className="icon-button app-menu-button mobile-only" onClick={() => setChatDrawerOpen(true)} aria-label={t('openNavigation')}>☰</button>}<label className="theme-control">
+          <span className="sr-only">{t('colorTheme')}</span>
+          <select aria-label={t('colorTheme')} value={themeMode} onChange={(event) => setThemeMode(event.target.value as ThemeMode)}>
+            <option value="system">{t('systemTheme')}</option>
+            <option value="light">{t('lightTheme')}</option>
+            <option value="dark">{t('darkTheme')}</option>
+          </select>
+        </label>
+        <label className="theme-control">
+          <span className="sr-only">{t('languageLabel')}</span>
+          <select aria-label={t('languageLabel')} value={interfaceLanguage} onChange={(event) => setInterfaceLanguage(event.target.value as InterfaceLanguage)}>{LANGUAGES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
+        </label>{user ? <>
+          <span className="session-badge"><i /> {t('secureSession')}</span>
+          <span className="user-chip">{user.role === 'patient' ? displayName : user.email}</span>
+          <button className="button button-outline button-small" onClick={() => void logout()} disabled={busy}>{t('signOut')}</button>
+        </> : !['login', 'register', 'forgot', 'reset', 'shared'].includes(page) && <>
+          <button className="button button-quiet" onClick={() => beginAuth('login')}>{t('signIn')}</button>
+          <button className="button button-primary button-small" onClick={() => beginAuth('register')}>{t('createAccount')}</button>
+        </>}
         </div>
       </header>
 
-      {page === 'loading' && <main className="center-state"><span className="spinner" /><p>Checking your secure session…</p></main>}
-      {page === 'unavailable' && <main className="center-state"><span className="state-icon">!</span><p className="eyebrow">Service unavailable</p><h1>We couldn’t load your account.</h1><p>{error || 'The API or database did not respond. Your account data has not been changed.'}</p><button className="button button-primary" onClick={() => void retry()}>Try again</button></main>}
+      {page === 'loading' && <main className="center-state">
+        <span className="spinner" />
+        <p>{t('checkingSession')}</p>
+      </main>}
+      {page === 'unavailable' && <main className="center-state">
+        <span className="state-icon">!</span>
+        <p className="eyebrow">{t('serviceUnavailable')}</p>
+        <h1>{t('unableLoadAccount')}</h1>
+        <p>{error || t('serviceUnavailableBody')}</p>
+        <button className="button button-primary" onClick={() => void retry()}>{t('tryAgain')}</button>
+      </main>}
 
+      {interfaceLanguage !== 'en' && <p className="translation-coverage" role="status">{t('translationCoverageNotice')}</p>}
       {page === 'landing' && !user && <main className="landing">
         <section className="landing-copy">
-          <span className="eyebrow"><span className="eyebrow-mark" /> HEALTH INFORMATION, WITH HUMAN OVERSIGHT</span>
-          <h1>Care starts with<br /><em>being understood.</em></h1>
-          <p className="landing-lead">A health information service shaped for Ghana’s languages, with access to clinician review.</p>
-          <div className="landing-actions"><button className="button button-primary button-large" onClick={() => beginAuth('register')}>Create a patient account <span>→</span></button><button className="button button-outline button-large" onClick={() => beginAuth('login')}>Sign in</button></div>
-          <div className="language-strip"><span>DESIGNED FOR</span>{LANGUAGES.map((item) => <b key={item.value}>{item.label}</b>)}</div>
+          <span className="eyebrow"><span className="eyebrow-mark" /> {t('heroEyebrow')}</span>
+          <h1>{t('heroHeadline')}</h1>
+          <p className="landing-lead">{t('heroLead')}</p>
+          <div className="landing-actions">
+            <button className="button button-primary button-large" onClick={() => beginAuth('register')}>{t('createPatientAccount')} <span>→</span></button>
+            <a className="button button-outline button-large" href="#how-it-works">{t('howItWorks')}</a>
+          </div>
+          <div className="language-strip" id="languages"><span>{t('languageStripLabel')}</span>{LANGUAGES.map((item) => <b key={item.value}>{item.label}</b>)}</div>
         </section>
         <aside className="landing-visual">
-          <div className="visual-topline"><span><i /> HEALTH INFORMATION · GHANA</span><span>GH · 01</span></div>
-          <div className="visual-orbit"><div className="orbit-ring orbit-one" /><div className="orbit-ring orbit-two" /><div className="orbit-center">+</div><div className="orbit-label label-one">Patient voice</div><div className="orbit-label label-two">Local language</div><div className="orbit-label label-three">Human care</div></div>
-          <div className="visual-footer"><strong>Information should feel closer to home.</strong><span>English · Twi · Ewe · Ga · Hausa</span></div>
+          <div className="visual-topline"><span><i /> {t('visualTopline')}</span></div>
+          <div className="visual-orbit">
+            <div className="orbit-ring orbit-one" />
+            <div className="orbit-ring orbit-two" />
+            <div className="orbit-center">+</div>
+            <div className="orbit-label label-one">{t('patientVoice')}</div>
+            <div className="orbit-label label-two">{t('localLanguage')}</div>
+            <div className="orbit-label label-three">{t('humanCare')}</div>
+          </div>
+          <div className="visual-footer"><strong>{t('aboutHeading')}</strong><span>English · Twi · Ewe · Ga · Hausa</span></div>
         </aside>
-        <section className="landing-bottom"><article><span className="mini-icon">01</span><div><strong>English · Twi · Ewe · Ga · Hausa</strong><p>Choose a preferred language for your account.</p></div></article><article><span className="mini-icon">02</span><div><strong>Clinician review</strong><p>Patient messages can be routed for human review.</p></div></article><article><span className="mini-icon">03</span><div><strong>Health information</strong><p>AI generated answers are not available yet.</p></div></article></section>
-        <div className="medical-notice"><span>i</span><p><strong>Health service notice.</strong> This application is not clinically validated and does not provide diagnosis or treatment. Contact a qualified health professional for care.</p></div>
+        <section className="landing-bottom" id="about">
+          <article><span className="mini-icon">01</span><div><strong>{t('languageChoiceTitle')}</strong><p>{t('languageChoiceBody')}</p></div></article>
+          <article><span className="mini-icon">02</span><div><strong>{t('clinicianReviewTitle')}</strong><p>{t('clinicianReviewBody')}</p></div></article>
+          <article><span className="mini-icon">03</span><div><strong>{t('healthInfoTitle')}</strong><p>{t('healthInfoBody')}</p></div></article>
+        </section>
+        <section className="public-content-section" id="how-it-works">
+          <h2>{t('howHeading')}</h2>
+          <div className="how-grid">
+            <article><h3>{t('howStepAccount')}</h3><p>{t('howStepAccountBody')}</p></article>
+            <article><h3>{t('howStepMessage')}</h3><p>{t('howStepMessageBody')}</p></article>
+            <article><h3>{t('howStepReview')}</h3><p>{t('howStepReviewBody')}</p></article>
+          </div>
+        </section>
+        <section className="public-content-section public-privacy"><h2>{t('privacyHeading')}</h2><p>{t('privacyBody')}</p><p>{t('privacyCaution')}</p></section>
+        <section className="public-content-section public-faq"><h2>{t('faqHeading')}</h2>
+          <details><summary>{t('faqQuestionAnswers')}</summary><p>{t('faqAnswerAnswers')}</p></details>
+          <details><summary>{t('faqQuestionEmergency')}</summary><p>{t('faqAnswerEmergency')}</p></details>
+        </section>
+        <section className="public-cta"><div><h2>{t('finalCtaHeading')}</h2><p>{t('finalCtaBody')}</p></div><button className="button button-primary button-large" onClick={() => beginAuth('register')}>{t('createPatientAccount')}</button></section>
+        <div className="medical-notice"><span>i</span><p><strong>{t('healthInfoTitle')}.</strong> {t('healthServiceNotice')}</p></div>
       </main>}
 
       {(page === 'login' || page === 'register') && !user && <main className="auth-layout">
-        <section className="auth-aside"><span className="eyebrow">GHANA HEALTH ASSISTANT</span><h1>{authMode === 'login' ? 'Welcome back.' : 'A thoughtful place to start.'}</h1><p>{authMode === 'login' ? 'Sign in to continue to your patient workspace.' : 'Create a patient account and choose your preferred language.'}</p><div className="auth-aside-note"><span>+</span><p>Private account access. Public registration is for patients only.</p></div></section>
-        <section className="auth-panel"><button className="back-link" onClick={() => { setPage('landing'); setError('') }}>← Back to home</button><span className="eyebrow">{authMode === 'login' ? 'PATIENT SIGN IN' : 'PATIENT REGISTRATION'}</span><h2>{authMode === 'login' ? 'Sign in to your account' : 'Create your account'}</h2><p className="panel-lead">{authMode === 'login' ? 'Use the email and password for your account.' : 'Your account will have the patient role.'}</p>
+        <section className="auth-aside">
+          <span className="eyebrow">GHANA HEALTH ASSISTANT</span>
+          <h1>{authMode === 'login' ? t('welcomeBack') : t('authRegisterHeading')}</h1>
+          <p>{authMode === 'login' ? t('authWelcomeBody') : t('authRegisterBody')}</p>
+          <div className="auth-aside-note"><span>+</span><p>{t('patientOnlyNotice')}</p></div>
+        </section>
+        <section className="auth-panel">
+          <button className="back-link" onClick={() => { setPage('landing'); setError('') }}>← {t('backHome')}</button>
+          <span className="eyebrow">{authMode === 'login' ? t('patientSignIn') : t('patientRegistration')}</span>
+          <h2>{authMode === 'login' ? t('signInHeading') : t('createAccountHeading')}</h2>
+          <p className="panel-lead">{authMode === 'login' ? t('loginIntro') : t('registrationIntro')}</p>
           <form onSubmit={(event) => void handleAuth(event)} className="form-stack">
-            {authMode === 'register' && <><label htmlFor="full-name">Full name</label><input id="full-name" autoComplete="name" value={fullName} onChange={(event) => setFullName(event.target.value)} minLength={2} maxLength={160} required placeholder="Your name" /><label htmlFor="register-language">Preferred language</label><select id="register-language" value={language} onChange={(event) => setLanguage(event.target.value)}>{LANGUAGES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></>}
-            <label htmlFor="email">Email address</label><input id="email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={320} required placeholder="you@example.com" />
-            <label htmlFor="password">Password</label><div className="password-wrap"><input id="password" type={showPassword ? 'text' : 'password'} autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={(event) => setPassword(event.target.value)} minLength={authMode === 'register' ? 12 : 1} maxLength={128} required placeholder={authMode === 'register' ? 'At least 12 characters' : 'Your password'} /><button type="button" onClick={() => setShowPassword((shown) => !shown)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? 'Hide' : 'Show'}</button></div>
-            {authMode === 'register' && <><label htmlFor="confirm-password">Confirm password</label><div className="password-wrap"><input id="confirm-password" type={showPassword ? 'text' : 'password'} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} minLength={12} maxLength={128} required placeholder="Enter password again" /><button type="button" onClick={() => setShowPassword((shown) => !shown)}>{showPassword ? 'Hide' : 'Show'}</button></div><p className="field-hint">Use at least 12 characters. Choose a unique password.</p></>}
-            {error && <p className="alert alert-error" role="alert">{error}</p>}<button className="button button-primary button-full button-large" type="submit" disabled={busy}>{busy ? 'Please wait…' : authMode === 'login' ? 'Sign in securely' : 'Create patient account'} {!busy && <span>→</span>}</button>
+            {authMode === 'register' && <>
+              <label htmlFor="full-name">{t('fullName')}</label>
+              <input id="full-name" autoComplete="name" value={fullName} onChange={(event) => setFullName(event.target.value)} minLength={2} maxLength={160} required placeholder={t('yourName')} />
+              <label htmlFor="register-language">{t('preferredConversationLanguage')}</label>
+              <select id="register-language" value={language} onChange={(event) => setLanguage(event.target.value)}>{LANGUAGES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
+              <p className="field-hint">{t('conversationLanguageHint')}</p>
+            </>}
+            <label htmlFor="email">{t('emailAddress')}</label>
+            <input id="email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={320} required placeholder={t('emailPlaceholder')} />
+            <label htmlFor="password">{t('password')}</label>
+            <div className="password-wrap">
+              <input id="password" type={showPassword ? 'text' : 'password'} autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={(event) => setPassword(event.target.value)} minLength={authMode === 'register' ? 12 : 1} maxLength={128} required placeholder={authMode === 'register' ? t('newPasswordPlaceholder') : t('passwordPlaceholder')} aria-describedby={authMode === 'register' ? 'password-guidance' : undefined} />
+              <button type="button" onClick={() => setShowPassword((shown) => !shown)} aria-label={showPassword ? t('hidePassword') : t('showPassword')}>{showPassword ? t('hidePassword') : t('showPassword')}</button>
+            </div>
+            {authMode === 'register' && <>
+              <label htmlFor="confirm-password">{t('confirmPassword')}</label>
+              <div className="password-wrap">
+                <input id="confirm-password" type={showPassword ? 'text' : 'password'} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} minLength={12} maxLength={128} required placeholder={t('confirmPasswordPlaceholder')} />
+                <button type="button" onClick={() => setShowPassword((shown) => !shown)} aria-label={showPassword ? t('hidePassword') : t('showPassword')}>{showPassword ? t('hidePassword') : t('showPassword')}</button>
+              </div>
+              <p className="field-hint" id="password-guidance">{t('passwordStrengthGuidance')}</p>
+              <details className="data-handling"><summary>{t('dataHandlingLink')}</summary><p>{t('accountDataNotice')}</p><p>{t('separateMessageConsent')}</p></details>
+              <label className="consent-control registration-acknowledgement">
+                <input type="checkbox" checked={registrationAcknowledged} onChange={(event) => setRegistrationAcknowledged(event.target.checked)} required />
+                <span>{t('registrationReadAcknowledgement')}</span>
+              </label>
+            </>}
+            {error && <p className="alert alert-error" role="alert">{error}</p>}
+            <button className="button button-primary button-full button-large" type="submit" disabled={busy || (authMode === 'register' && !registrationAcknowledged)}>{busy ? t('loading') : authMode === 'login' ? t('signInSecurely') : t('createPatientAccountSubmit')} {!busy && <span>→</span>}</button>
           </form>
           {authMode === 'login' && <button className="back-link" onClick={() => { setResetEmail(email); setError(''); setSuccess(''); setPage('forgot') }}>{t('forgotPassword')}</button>}
-          <p className="auth-switch">{authMode === 'login' ? 'New to the project?' : 'Already have an account?'} <button onClick={() => beginAuth(authMode === 'login' ? 'register' : 'login')}>{authMode === 'login' ? t('createAccount') : t('signIn')}</button></p>
-          <div className="medical-notice compact"><span>i</span><p>Do not use this service for emergencies or as a substitute for care from a qualified health professional.</p></div>
+          <p className="auth-switch">{authMode === 'login' ? t('newToProject') : t('alreadyHaveAccount')} <button onClick={() => beginAuth(authMode === 'login' ? 'register' : 'login')}>{authMode === 'login' ? t('createAccount') : t('signIn')}</button></p>
+          <div className="medical-notice compact"><span>i</span><p>{t('registrationPrivacyNote')}</p></div>
         </section>
       </main>}
 
-      {page === 'forgot' && !user && <main className="auth-layout"><section className="auth-aside"><span className="eyebrow">GHANA HEALTH ASSISTANT</span><h1>Recover your account.</h1><p>Request a time-limited password reset link by email.</p></section><section className="auth-panel"><button className="back-link" onClick={() => { setPage('login'); setError(''); setSuccess('') }}>← Back to sign in</button><h2>{t('forgotPassword')}</h2><p className="panel-lead">If an account matches the email, we’ll send reset instructions.</p><form className="form-stack" onSubmit={(event) => void requestPasswordReset(event)}><label htmlFor="reset-email">Email address</label><input id="reset-email" type="email" autoComplete="email" value={resetEmail} onChange={(event) => setResetEmail(event.target.value)} required maxLength={320} />{error && <p className="alert alert-error" role="alert">{error}</p>}{success && <p className="alert alert-success" role="status">{success}</p>}<button className="button button-primary button-full" type="submit" disabled={busy}>{busy ? t('loading') : t('sendResetLink')}</button></form></section></main>}
+      {page === 'forgot' && !user && <main className="auth-layout">
+        <section className="auth-aside">
+          <span className="eyebrow">GHANA HEALTH ASSISTANT</span>
+          <h1>{t('recoverHeading')}</h1>
+          <p>{t('recoverBody')}</p>
+        </section>
+        <section className="auth-panel">
+          <button className="back-link" onClick={() => { setPage('login'); setError(''); setSuccess('') }}>← {t('backToSignIn')}</button>
+          <h2>{t('forgotPassword')}</h2>
+          <p className="panel-lead">{t('resetLinkIfAccount')}</p>
+          <form className="form-stack" onSubmit={(event) => void requestPasswordReset(event)}>
+            <label htmlFor="reset-email">{t('emailAddress')}</label>
+            <input id="reset-email" type="email" autoComplete="email" value={resetEmail} onChange={(event) => setResetEmail(event.target.value)} required maxLength={320} />
+            {error && <p className="alert alert-error" role="alert">{error}</p>}{success && <p className="alert alert-success" role="status">{success}</p>}
+            <button className="button button-primary button-full" type="submit" disabled={busy}>{busy ? t('loading') : t('sendResetLink')}</button>
+          </form>
+        </section>
+      </main>}
 
-      {page === 'reset' && !user && <main className="auth-layout"><section className="auth-aside"><span className="eyebrow">GHANA HEALTH ASSISTANT</span><h1>Choose a new password.</h1><p>{t('passwordGuidance')}</p></section><section className="auth-panel"><h2>{t('resetPassword')}</h2>{success ? <><p className="alert alert-success" role="status">{success}</p><button className="button button-primary" onClick={() => { setPage('login'); setSuccess(''); setError('') }}>{t('signIn')}</button></> : <form className="form-stack" onSubmit={(event) => void submitPasswordReset(event)}><label htmlFor="new-password">{t('newPassword')}</label><input id="new-password" type={showPassword ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={128} required value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} /><label htmlFor="confirm-reset-password">{t('confirmPassword')}</label><input id="confirm-reset-password" type={showPassword ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={128} required value={resetConfirmPassword} onChange={(event) => setResetConfirmPassword(event.target.value)} /><button type="button" className="back-link" onClick={() => setShowPassword((value) => !value)}>{showPassword ? 'Hide passwords' : 'Show passwords'}</button>{error && <p className="alert alert-error" role="alert">{error}</p>}<button className="button button-primary button-full" disabled={busy}>{busy ? t('loading') : t('resetPassword')}</button></form>}</section></main>}
+      {page === 'reset' && !user && <main className="auth-layout">
+        <section className="auth-aside">
+          <span className="eyebrow">GHANA HEALTH ASSISTANT</span>
+          <h1>{t('chooseNewPassword')}</h1>
+          <p>{t('passwordGuidance')}</p>
+        </section>
+        <section className="auth-panel">
+          <h2>{t('resetPassword')}</h2>{success ? <>
+            <p className="alert alert-success" role="status">{success}</p>
+            <button className="button button-primary" onClick={() => { setPage('login'); setSuccess(''); setError('') }}>{t('signIn')}</button>
+          </> : <form className="form-stack" onSubmit={(event) => void submitPasswordReset(event)}>
+            <label htmlFor="new-password">{t('newPassword')}</label>
+            <input id="new-password" type={showPassword ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={128} required value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} />
+            <label htmlFor="confirm-reset-password">{t('confirmPassword')}</label>
+            <input id="confirm-reset-password" type={showPassword ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={128} required value={resetConfirmPassword} onChange={(event) => setResetConfirmPassword(event.target.value)} />
+            <button type="button" className="back-link" onClick={() => setShowPassword((value) => !value)}>{showPassword ? t('hidePasswords') : t('showPasswords')}</button>
+            {error && <p className="alert alert-error" role="alert">{error}</p>}
+            <button className="button button-primary button-full" disabled={busy}>{busy ? t('loading') : t('resetPassword')}</button>
+          </form>}</section>
+      </main>}
 
-      {page === 'shared' && <main className="shared-page"><section className="shared-card"><span className="eyebrow">GHANA HEALTH ASSISTANT · SHARED VIEW</span><h1>Shared conversation</h1><p className="medical-notice compact">{t('sharedReadOnly')}</p>{error && <p className="alert alert-error" role="alert">{error}</p>}{!publicConversation && !error && <p role="status">{t('loading')}</p>}{publicConversation && <><p>Conversation language: {languageName(publicConversation.preferred_language)} · {new Date(publicConversation.created_at).toLocaleDateString()}</p><div className="chat-messages">{publicConversation.messages.map((message, index) => <article key={`${message.created_at}-${index}`} className={message.sender_role === 'patient' ? 'chat-message patient-message' : 'chat-message assistant-message'}><span>{message.sender_role === 'patient' ? 'Patient' : message.sender_role === 'doctor' ? 'Clinician' : 'Health Assistant'} · {new Date(message.created_at).toLocaleString()}</span><p>{message.body}</p></article>)}</div></>}</section></main>}
+      {page === 'shared' && <main className="shared-page">
+        <section className="shared-card">
+          <span className="eyebrow">{t('sharedViewEyebrow')}</span>
+          <h1>{t('sharedConversation')}</h1>
+          <p className="medical-notice compact">{t('sharedReadOnly')}</p>{error && <p className="alert alert-error" role="alert">{error}</p>}{!publicConversation && !error && <p role="status">{t('loading')}</p>}{publicConversation && <>
+            <p>{t('conversationLanguageLabel')}: {languageName(publicConversation.preferred_language)} · {new Date(publicConversation.created_at).toLocaleDateString()}</p>
+            <div className="chat-messages">{publicConversation.messages.map((message, index) => <article key={`${message.created_at}-${index}`} className={message.sender_role === 'patient' ? 'chat-message patient-message' : message.sender_role === 'doctor' ? 'chat-message clinician-message' : 'chat-message assistant-message'}>
+              <span>{message.sender_role === 'patient' ? t('patient') : message.sender_role === 'doctor' ? t('clinician') : t('healthAssistantRole')} · {new Date(message.created_at).toLocaleString()}</span>
+              <p>{message.body}</p>
+            </article>)}</div>
+          </>}</section>
+      </main>}
 
       {user && <div className={`workspace ${user.role === 'patient' ? 'chat-workspace' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${chatDrawerOpen ? 'sidebar-open' : ''}`}>
-        {chatDrawerOpen && <button className="app-drawer-backdrop mobile-only" aria-label="Close navigation" onClick={() => setChatDrawerOpen(false)} />}
+        {chatDrawerOpen && <button className="app-drawer-backdrop mobile-only" aria-label={t('closeNavigation')} onClick={() => setChatDrawerOpen(false)} />}
         <aside className="sidebar">
-          <div className="sidebar-brand"><span className="brand-mark">+</span><strong>Ghana Health</strong><button className="sidebar-collapse" onClick={() => setSidebarCollapsed((collapsed) => !collapsed)} aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>{sidebarCollapsed ? '›' : '‹'}</button></div>
-          <div className="sidebar-role"><span className="role-avatar">{user.role === 'patient' ? (displayName[0] || 'P').toUpperCase() : user.role === 'doctor' ? 'C' : 'A'}</span><div><strong>{user.role === 'patient' ? displayName : user.role === 'doctor' ? 'Clinician workspace' : 'Administration'}</strong><small>{user.role === 'doctor' ? 'VERIFIED REVIEWER' : user.role.toUpperCase()}</small></div></div>
-          {user.role === 'patient' && <nav className="side-nav" aria-label="Patient navigation">{patientNav.map((item) => <button key={item.key} className={page === item.key ? 'nav-item active' : 'nav-item'} onClick={() => navigate(item.key)} aria-label={item.label}><span>{item.icon}</span><span className="nav-label">{item.label}</span></button>)}</nav>}
+          <div className="sidebar-brand">
+            <span className="brand-mark">+</span>
+            <strong>Ghana Health</strong>
+            <button className="sidebar-collapse" onClick={() => setSidebarCollapsed((collapsed) => !collapsed)} aria-label={sidebarCollapsed ? t('expandSidebar') : t('collapseSidebar')}>{sidebarCollapsed ? '›' : '‹'}</button>
+          </div>
+          <div className="sidebar-role">
+            <span className="role-avatar">{user.role === 'patient' ? (displayName[0] || 'P').toUpperCase() : user.role === 'doctor' ? 'C' : 'A'}</span>
+            <div>
+              <strong>{user.role === 'patient' ? displayName : user.role === 'doctor' ? t('clinicianWorkspace') : t('administration')}</strong>
+              <small>{user.role === 'doctor' ? t('verifiedReviewer') : roleName.toUpperCase()}</small>
+            </div>
+          </div>
+          {user.role === 'patient' && <nav className="side-nav" aria-label={t('patientNavigation')}>{patientNav.map((item) => <button key={item.key} className={page === item.key ? 'nav-item active' : 'nav-item'} onClick={() => navigate(item.key)} aria-current={page === item.key ? 'page' : undefined} aria-label={item.label}>
+            <span>{item.icon}</span><span className="nav-label">{item.label}</span>
+          </button>)}</nav>}
           {user.role === 'patient' && page === 'assistant' && conversationHistory}
-          {user.role === 'doctor' && <nav className="side-nav" aria-label="Clinician navigation"><button className="nav-item active"><span>◷</span>Review workspace</button></nav>}
-          {user.role === 'admin' && <nav className="side-nav" aria-label="Administrator navigation"><button className="nav-item active"><span>▦</span>Administration</button></nav>}
-          <div className="sidebar-footer"><div className="privacy-mark">◇</div><strong>Your privacy matters</strong><p>Messages are stored in your account and visible to authorized reviewers.</p></div>
+          {user.role === 'doctor' && <nav className="side-nav" aria-label={t('clinicianNavigation')}>
+            <button className="nav-item active" aria-current="page"><span>◷</span>{t('reviewWorkspace')}</button>
+          </nav>}
+          {user.role === 'admin' && <nav className="side-nav" aria-label={t('administratorNavigation')}>
+            <button className="nav-item active" aria-current="page"><span>▦</span>{t('administration')}</button>
+          </nav>}
+          <div className="sidebar-footer">
+            <div className="privacy-mark">◇</div>
+            <strong>{t('privacyMatters')}</strong>
+            <p>{t('privacyMattersBody')}</p>
+          </div>
         </aside>
         <main className="main-content">
-          <div className="content-topline"><span>GHANA HEALTH ASSISTANT <b>/</b> {user.role.toUpperCase()}</span><span className="connected-label"><i /> Connected</span></div>
+          <div className="content-topline">
+            <span>GHANA HEALTH ASSISTANT <b>/</b> {roleName.toUpperCase()}</span>
+            <span className="connected-label"><i /> {t('connected')}</span>
+          </div>
           {error && <p className="alert alert-error" role="alert">{error}</p>}{success && <p className="alert alert-success" role="status">{success}</p>}
           {user.role === 'patient' && page === 'dashboard' && <section>
-            <div className="page-heading"><div><span className="eyebrow">PATIENT OVERVIEW</span><h1>Good day, {displayName.split(' ')[0]}.</h1><p>Your health information workspace is taking shape.</p></div><button className="button button-primary" onClick={() => navigate('assistant')}>Open assistant <span>→</span></button></div>
-            <div className="status-banner"><div className="status-banner-icon">✳</div><div><strong>Messages are available for clinician review</strong><p>Automated health answers are unavailable until reviewed health sources and response safeguards are connected.</p></div><span className="status-tag">HUMAN REVIEW</span></div>
-            <div className="stat-grid"><article className="stat-card"><span>YOUR REQUESTS</span><strong>{submissions.length}</strong><small>Saved to your account</small></article><article className="stat-card"><span>PENDING REVIEW</span><strong>{submissions.filter((item) => item.status === 'pending_review').length}</strong><small>Awaiting clinician review</small></article><article className="stat-card"><span>LANGUAGE</span><strong className="stat-language">{languageName(language)}</strong><small>Your current preference</small></article></div>
-            <div className="section-heading"><div><span className="eyebrow">YOUR SPACE</span><h2>Get started</h2></div></div>
-            <div className="action-grid"><button className="action-card" onClick={() => navigate('assistant')}><span className="action-icon">✳</span><strong>Health assistant</strong><p>Send a message for clinician review. Automated answers are unavailable.</p><span className="action-arrow">→</span></button><button className="action-card" onClick={() => navigate('assistant')}><span className="action-icon">◷</span><strong>Chat history</strong><p>Open messages and see clinician review status.</p><span className="action-arrow">→</span></button><button className="action-card" onClick={() => navigate('profile')}><span className="action-icon">◎</span><strong>Profile & settings</strong><p>Update your display name, language, and theme.</p><span className="action-arrow">→</span></button></div>
-            <div className="medical-notice"><span>i</span><p><strong>Health service notice.</strong> This application is not clinically validated and does not provide diagnosis or treatment.</p></div>
+            <div className="page-heading">
+              <div>
+                <span className="eyebrow">{t('dashboardEyebrow')}</span>
+                <h1>{t('dashboardWelcome').replace('{name}', displayName.split(' ')[0])}</h1>
+                <p>{t('healthInformationWorkspace')}</p>
+              </div>
+              <button className="button button-primary" onClick={() => navigate('assistant')}>{t('openAssistant')} <span>→</span></button>
+            </div>
+            <div className="status-banner">
+              <div className="status-banner-icon">✳</div>
+              <div><strong>{t('messagesAvailableReview')}</strong><p>{t('automatedUnavailableLong')}</p></div>
+              <span className="status-tag">{t('humanReview')}</span>
+            </div>
+            <div className="stat-grid">
+              <article className="stat-card"><span>{t('yourRequests')}</span><strong>{submissions.length}</strong><small>{t('savedToAccount')}</small></article>
+              <article className="stat-card"><span>{t('pendingReview')}</span><strong>{submissions.filter((item) => item.status === 'pending_review').length}</strong><small>{t('awaitingClinician')}</small></article>
+              <article className="stat-card"><span>{t('languagePreference')}</span><strong className="stat-language">{languageName(language)}</strong><small>{t('currentPreference')}</small></article>
+            </div>
+            <div className="section-heading"><div><span className="eyebrow">{t('yourSpace')}</span><h2>{t('getStarted')}</h2></div></div>
+            <div className="action-grid">
+              <button className="action-card" onClick={() => navigate('assistant')}><span className="action-icon">✳</span><strong>{t('healthAssistant')}</strong><p>{t('automatedUnavailableLong')}</p><span className="action-arrow">→</span></button>
+              <button className="action-card" onClick={() => navigate('assistant')}><span className="action-icon">◷</span><strong>{t('chatHistory')}</strong><p>{t('chatHistoryDescription')}</p><span className="action-arrow">→</span></button>
+              <button className="action-card" onClick={() => navigate('profile')}><span className="action-icon">◎</span><strong>{t('profileAndSettings')}</strong><p>{t('profileDescription')}</p><span className="action-arrow">→</span></button>
+            </div>
+            <div className="medical-notice"><span>i</span><p><strong>{t('healthInfoTitle')}.</strong> {t('healthServiceNotice')}</p></div>
           </section>}
 
           {user.role === 'patient' && page === 'assistant' && <section className="chat-page">
-            <div className="chat-page-heading"><div><span className="eyebrow">HEALTH ASSISTANT</span><h1>{selectedChat?.title || 'New conversation'}</h1><p>Messages are saved to your account and routed for clinician review. Automated health answers are unavailable.</p></div><div className="chat-heading-actions"><label className="language-picker">LANGUAGE<select value={language} onChange={(event) => setLanguage(event.target.value)}>{LANGUAGES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><button className="button button-outline button-small" onClick={() => void shareChat(selectedChat)} disabled={!selectedChat}>{t('shareConversation')}</button></div></div>
+            <div className="chat-page-heading">
+              <div>
+                <span className="eyebrow">{t('healthAssistant')}</span>
+                <h1>{selectedChat?.title || t('newConversation')}</h1>
+                <p>{t('savedForReview')}</p>
+              </div>
+              <div className="chat-heading-actions">
+                <label className="language-picker">{t('conversationLanguageLabel')}<select value={language} onChange={(event) => setLanguage(event.target.value)}>{LANGUAGES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+                <button className="button button-outline button-small" onClick={() => void shareChat(selectedChat)} disabled={!selectedChat}>{t('shareConversation')}</button>
+              </div>
+            </div>
             <div className="chat-layout" aria-busy={chatBusy}>
-              <aside className={chatDrawerOpen ? 'chat-history-panel drawer-open' : 'chat-history-panel'} aria-label="Conversation history"><div className="chat-history-brand"><span className="chat-mark">+</span><strong>Conversations</strong><button className="icon-button mobile-only" onClick={() => setChatDrawerOpen(false)} aria-label="Close conversation history">×</button></div><button className="button button-primary chat-new-button" onClick={newChat}>＋ New chat</button><label className="chat-search"><span>Search conversations</span><input type="search" value={chatSearch} onChange={(event) => void searchChats(event.target.value)} placeholder="Search titles" /></label><div className="chat-history-list">{chatResults.length === 0 ? <div className="chat-empty"><strong>{chatSearch ? 'No matching conversations' : 'No conversations yet'}</strong><p>{chatSearch ? 'Try a different title.' : 'Your saved messages will appear here.'}</p></div> : ['Today', 'Yesterday', 'Previous days'].map((group) => { const groupItems = chatResults.filter((item) => conversationDateGroup(item.updated_at || item.created_at) === group); return groupItems.length ? <div className="chat-history-group" key={group}><strong>{group}</strong>{groupItems.map((item) => <article className={selectedChat?.id === item.id ? 'chat-history-item selected' : 'chat-history-item'} key={item.id}><button onClick={() => void openChat(item.id)}><strong>{item.title || 'Health conversation'}</strong><small>{item.status === 'pending_review' ? 'Pending review' : 'Reviewed'}</small></button><div><button className="icon-button" aria-label={'Rename ' + item.title} onClick={() => void renameChat(item)}>✎</button><button className="icon-button" aria-label={'Copy ' + item.title} onClick={() => void shareSavedChat(item)}>↗</button><button className="icon-button danger-icon" aria-label={'Delete ' + item.title} onClick={() => void deleteChat(item)}>×</button></div></article>)}</div> : null })}</div><div className="chat-sidebar-note">Your conversations are private to your account.</div></aside>
-              {chatDrawerOpen && <button className="drawer-backdrop mobile-only" aria-label="Close conversation history" onClick={() => setChatDrawerOpen(false)} />}
-              <div className="chat-card"><div className="chat-header"><button className="icon-button mobile-only" onClick={() => setChatDrawerOpen(true)} aria-label="Open conversation history">☰</button><span className="chat-mark">✳</span><div><strong>{selectedChat?.title || 'New conversation'}</strong><small><i /> {selectedChat ? (selectedChat.status === 'pending_review' ? 'Awaiting clinician review' : 'Reviewed by clinician') : 'Private conversation'}</small></div><button className="icon-button" onClick={() => void shareChat(selectedChat)} disabled={!selectedChat} aria-label="Share conversation">↗</button></div><div className="chat-body" ref={chatBodyRef} aria-live="polite">{selectedChat?.messages.length ? <div className="chat-messages">{selectedChat.messages.map((message) => <article className={message.sender_role === 'patient' ? 'chat-message patient-message' : 'chat-message assistant-message'} key={message.id}><span>{message.sender_role === 'patient' ? 'You' : 'Health Assistant'} · {new Date(message.created_at).toLocaleString()}</span><p>{message.body}</p></article>)}<div className="assistant-unavailable"><strong>No automated answer is available.</strong><p>Your message is saved for clinician review. The health information engine is not connected.</p></div></div> : <div className="assistant-placeholder"><span className="placeholder-symbol">✳</span><h2>Ask a health question</h2><p>Your message will be stored and routed for clinician review. This service does not generate medical answers yet.</p></div>}</div><form className="chat-composer" onSubmit={(event) => void sendChatMessage(event)}><textarea ref={composerRef} rows={2} value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} maxLength={4000} minLength={5} required aria-label="Write a message" placeholder="Write a message for clinician review…" /><button className="mic-button" type="button" disabled aria-label="Voice input unavailable">◉</button><button className="button button-primary" type="submit" disabled={sendingRequest || messageDraft.trim().length < 5}>{sendingRequest ? 'Saving…' : 'Send'}</button><label className="consent-control chat-consent"><input type="checkbox" checked={storeConsent} onChange={(event) => setStoreConsent(event.target.checked)} required /><span>I consent to storing this message for clinician review. Do not include details about emergencies; contact local emergency services.</span></label></form><p className="voice-note">Microphone input is unavailable because speech recognition is not connected.</p></div>
+              <div className="chat-card">
+                <div className="chat-header">
+                  <button className="icon-button mobile-only" onClick={() => setChatDrawerOpen(true)} aria-label={t('openHistory')}>☰</button>
+                  <span className="chat-mark">✳</span>
+                  <div>
+                    <strong>{selectedChat?.title || t('newConversation')}</strong>
+                    <small><i /> {selectedChat ? (selectedChat.status === 'pending_review' ? t('awaitingReview') : t('reviewedByClinician')) : t('privateConversation')}</small>
+                  </div>
+                  <button className="icon-button" onClick={() => void shareChat(selectedChat)} disabled={!selectedChat} aria-label={t('shareConversation')}>↗</button>
+                </div>
+                <div className="chat-body" ref={chatBodyRef} aria-live="polite">{selectedChat?.messages.length ? <div className="chat-messages">{selectedChat.messages.map((message) => <article className={message.sender_role === 'patient' ? 'chat-message patient-message' : message.sender_role === 'doctor' ? 'chat-message clinician-message' : 'chat-message assistant-message'} key={message.id}>
+                  <span>{message.sender_role === 'patient' ? t('you') : message.sender_role === 'doctor' ? t('clinician') : t('healthAssistantRole')} · {new Date(message.created_at).toLocaleString()}</span>
+                  <p>{message.body}</p>
+                </article>)}
+                  {selectedChat.messages.every((message) => message.sender_role === 'patient') && <div className="assistant-unavailable"><strong>{t('noAutomatedAnswer')}</strong><p>{t('savedForReview')}</p></div>}
+                </div> : <div className="assistant-placeholder">
+                  <span className="placeholder-symbol">✳</span>
+                  <h2>{t('askHealthQuestion')}</h2>
+                  <p>{t('chatEmptyBody')}</p>
+                </div>}</div>
+                <form className="chat-composer" onSubmit={(event) => void sendChatMessage(event)}>
+                  <textarea ref={composerRef} rows={2} value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} maxLength={4000} minLength={5} required aria-label={t('messagePlaceholder')} placeholder={t('messagePlaceholder')} />
+                  <button className="mic-button" type="button" disabled aria-label={t('voiceInputUnavailable')}>◉</button>
+                  <button className="button button-primary" type="submit" disabled={sendingRequest || messageDraft.trim().length < 5 || !storeConsent}>{sendingRequest ? t('saving') : t('send')}</button>
+                  <label className="consent-control chat-consent">
+                    <input type="checkbox" checked={storeConsent} onChange={(event) => setStoreConsent(event.target.checked)} required />
+                    <span>{t('consentToStoreMessage')}</span>
+                  </label>
+                </form>
+                <p className="voice-note">{t('voiceInputUnavailable')}</p>
+              </div>
             </div>
           </section>}
 
-
           {user.role === 'patient' && page === 'profile' && <section>
-            <div className="page-heading"><div><span className="eyebrow">ACCOUNT SETTINGS</span><h1>Your profile</h1><p>Manage the details used to personalize your account.</p></div></div>
-            <div className="settings-grid"><form className="settings-card form-stack" onSubmit={(event) => void saveProfile(event)}><h2>Personal preferences</h2><p className="panel-lead">Your account is a patient account. These details are private to your sign-in.</p><label htmlFor="profile-name">Display name</label><input id="profile-name" value={fullName || profile.full_name || ''} onChange={(event) => setFullName(event.target.value)} maxLength={160} minLength={2} required /><label htmlFor="profile-language">Preferred language</label><select id="profile-language" value={language} onChange={(event) => setLanguage(event.target.value)}>{LANGUAGES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select><label>Email address</label><input value={user.email} disabled /><button className="button button-primary" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</button></form>
-              <aside className="settings-card privacy-card"><span className="privacy-mark">◇</span><h2>Privacy & safety</h2><p>Messages are stored in your account and can be viewed by authorized clinicians. Avoid sharing unnecessary identifying details.</p><p>Your session uses an HttpOnly authentication cookie. Sign out when you finish on a shared device.</p><span className="pill pill-waiting">Clinician review only</span><label className="theme-setting" htmlFor="theme-setting">Color theme<select id="theme-setting" value={themeMode} onChange={(event) => setThemeMode(event.target.value as ThemeMode)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></aside>
+            <div className="page-heading">
+              <div><span className="eyebrow">{t('accountSettings')}</span><h1>{t('profileHeading')}</h1><p>{t('profileSubheading')}</p></div>
+            </div>
+            <div className="settings-grid">
+              <form className="settings-card form-stack" onSubmit={(event) => void saveProfile(event)}>
+                <h2>{t('personalPreferences')}</h2>
+                <p className="panel-lead">{t('accountIsPatient')}</p>
+                <label htmlFor="profile-name">{t('displayName')}</label>
+                <input id="profile-name" value={fullName || profile.full_name || ''} onChange={(event) => setFullName(event.target.value)} maxLength={160} minLength={2} required />
+                <label htmlFor="profile-language">{t('preferredLanguage')}</label>
+                <select id="profile-language" value={language} onChange={(event) => setLanguage(event.target.value)}>{LANGUAGES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
+                <label>{t('emailAddress')}</label>
+                <input value={user.email} disabled />
+                <button className="button button-primary" disabled={busy}>{busy ? t('savingProfile') : t('saveChanges')}</button>
+              </form>
+              <aside className="settings-card privacy-card">
+                <span className="privacy-mark">◇</span>
+                <h2>{t('privacySafety')}</h2>
+                <p>{t('privacySafetyBody')}</p>
+                <p>{t('sessionPrivacy')}</p>
+                <span className="pill pill-waiting">{t('clinicianOnly')}</span>
+                <label className="theme-setting" htmlFor="theme-setting">{t('colorTheme')}<select id="theme-setting" value={themeMode} onChange={(event) => setThemeMode(event.target.value as ThemeMode)}>
+                  <option value="system">{t('system')}</option>
+                  <option value="light">{t('light')}</option>
+                  <option value="dark">{t('dark')}</option>
+                </select></label>
+              </aside>
             </div>
           </section>}
 
           {user.role === 'doctor' && page === 'doctor' && <section>
-            <div className="page-heading"><div><span className="eyebrow">VERIFIED CLINICIAN</span><h1>Review workspace</h1><p>Review patient messages. Internal notes are not sent as patient replies.</p></div><span className="pill pill-waiting">{pending.length} pending</span></div>
-            <div className="section-heading"><div><span className="eyebrow">NEEDS REVIEW</span><h2>Pending requests</h2></div></div>
-            {pending.length === 0 ? <div className="table-card empty-state"><span>✓</span><strong>Queue is clear</strong><p>There are no submissions waiting for review.</p></div> :
-              <div className="review-list">{pending.map((item) => <article className="review-card" key={item.id}><div className="review-meta"><span className="pill pill-waiting">Pending review</span><span>{languageName(item.preferred_language)} · {new Date(item.created_at).toLocaleString()}</span></div><p className="review-message">{item.message}</p><label htmlFor={'note-' + item.id}>Clinician note <span>(internal, not sent to patient)</span></label><textarea id={'note-' + item.id} maxLength={2000} rows={3} value={notes[item.id] || ''} onChange={(event) => setNotes((previous) => ({ ...previous, [item.id]: event.target.value }))} placeholder="Optional internal note" /><button className="button button-primary" onClick={() => void reviewRequest(item)} disabled={reviewing === item.id}>{reviewing === item.id ? 'Saving review…' : 'Mark reviewed'}</button></article>)}</div>}
-            <div className="section-heading"><div><span className="eyebrow">COMPLETED</span><h2>Completed reviews</h2></div></div>
-            <div className="table-card">{completed.length === 0 ? <div className="empty-state"><strong>No completed reviews</strong><p>Completed items will appear here.</p></div> : completed.map((item) => <article className="request-row" key={item.id}><span className="request-symbol">✓</span><div><strong>{item.message}</strong><small>Reviewed {item.reviewed_at ? new Date(item.reviewed_at).toLocaleString() : ''}</small>{item.review_note && <small>Internal note: {item.review_note}</small>}</div><span className="pill pill-done">Reviewed</span></article>)}</div>
+            <div className="page-heading">
+              <div><span className="eyebrow">{t('verifiedClinician')}</span><h1>{t('doctorHeading')}</h1><p>{t('doctorSubheading')}</p></div>
+              <span className="pill pill-waiting">{t('pendingCount').replace('{count}', String(pending.length))}</span>
+            </div>
+            <div className="section-heading"><div><span className="eyebrow">{t('needsReview')}</span><h2>{t('pendingRequests')}</h2></div></div>
+            {pending.length === 0 ? <div className="table-card empty-state"><span>✓</span><strong>{t('queueClear')}</strong><p>{t('queueClearBody')}</p></div> :
+              <div className="review-list">{pending.map((item) => <article className="review-card" key={item.id}>
+                <div className="review-meta"><span className="pill pill-waiting">{t('pending')}</span><span>{languageName(item.preferred_language)} · {new Date(item.created_at).toLocaleString()}</span></div>
+                <p className="review-message">{item.message}</p>
+                <label htmlFor={'reply-' + item.id}>{t('replyToPatient')}</label>
+                <textarea id={'reply-' + item.id} maxLength={4000} rows={3} value={replies[item.id] || ''} onChange={(event) => setReplies((previous) => ({ ...previous, [item.id]: event.target.value }))} placeholder={t('replyToPatientHint')} />
+                <p className="field-hint">{t('replyToPatientHint')}</p>
+                <label htmlFor={'note-' + item.id}>{t('clinicianNote')} <span>{t('internalOnly')}</span></label>
+                <textarea id={'note-' + item.id} maxLength={2000} rows={3} value={notes[item.id] || ''} onChange={(event) => setNotes((previous) => ({ ...previous, [item.id]: event.target.value }))} placeholder={t('optionalInternalNote')} />
+                <button className="button button-primary" onClick={() => void reviewRequest(item)} disabled={reviewing === item.id}>{reviewing === item.id ? t('savingReview') : t('markReviewed')}</button>
+              </article>)}</div>}
+            <div className="section-heading"><div><span className="eyebrow">{t('completed')}</span><h2>{t('completedReviews')}</h2></div></div>
+            <div className="table-card">{completed.length === 0 ? <div className="empty-state"><strong>{t('noCompletedReviews')}</strong><p>{t('completedAppear')}</p></div> : completed.map((item) => <article className="request-row" key={item.id}>
+              <span className="request-symbol">✓</span>
+              <div><strong>{item.message}</strong><small>{t('reviewedAt')} {item.reviewed_at ? new Date(item.reviewed_at).toLocaleString() : ''}</small>{item.review_note && <small>{t('internalNote')}: {item.review_note}</small>}</div>
+              <span className="pill pill-done">{t('reviewed')}</span>
+            </article>)}</div>
           </section>}
 
           {user.role === 'admin' && page === 'admin' && <section>
-            <div className="page-heading"><div><span className="eyebrow">ADMINISTRATION</span><h1>System overview</h1><p>Manage access, clinician verification, and audit activity.</p></div></div>
-            <div className="stat-grid">{[{label:'Total users',value:overview?.users ?? 0},{label:'Patients',value:overview?.patients ?? 0},{label:'Clinicians to verify',value:overview?.doctors_pending_verification ?? 0},{label:'Requests pending review',value:overview?.submissions_pending_review ?? 0}].map((stat) => <article className="stat-card" key={stat.label}><span>{stat.label.toUpperCase()}</span><strong>{stat.value}</strong></article>)}</div>
-            <div className="section-heading"><div><span className="eyebrow">ACCESS CONTROL</span><h2>User management</h2></div></div>
-            <div className="table-card"><div className="table-header"><div><strong>Accounts</strong><small>Public registration creates patient accounts only.</small><small>Verify clinician credentials independently before approval.</small></div></div>
-              {adminUsers.length === 0 ? <div className="empty-state"><strong>No accounts found</strong></div> : <div className="admin-user-list">{adminUsers.map((account) => <article className="admin-user-row" key={account.id}><div><strong>{account.display_name || account.email}</strong><small>{account.email} · {account.role} · {new Date(account.created_at).toLocaleDateString()}</small>{account.professional_details && <small>Credential details: {account.professional_details}</small>}</div><div className="admin-user-actions">{account.role === 'doctor' && <span className={account.is_verified ? 'pill pill-done' : 'pill pill-waiting'}>{account.is_verified ? 'Verified' : 'Needs verification'}</span>}{account.role === 'doctor' && !account.is_verified && <button className="button button-outline button-small" disabled={busy} onClick={() => void verifyDoctor(account.id)}>Verify clinician</button>}<button className="button button-quiet button-small" disabled={busy} onClick={() => void toggleUser(account)}>{account.is_active ? 'Deactivate' : 'Activate'}</button></div></article>)}</div>}
+            <div className="page-heading">
+              <div><span className="eyebrow">{t('administration')}</span><h1>{t('systemOverview')}</h1><p>{t('adminSubheading')}</p></div>
             </div>
-            <div className="section-heading"><div><span className="eyebrow">ACCOUNTABILITY</span><h2>Recent audit activity</h2></div></div>
-            <div className="table-card">{audit.length === 0 ? <div className="empty-state"><p>No audit events have been recorded.</p></div> : audit.map((entry) => <article className="request-row audit-row" key={entry.id}><span className="request-symbol">≡</span><div><strong>{entry.action.replace(/_/g, ' ')}</strong><small>{entry.resource_type}{entry.resource_id ? ' · ' + entry.resource_id : ''} · {new Date(entry.created_at).toLocaleString()}</small></div></article>)}</div>
+            <div className="stat-grid">{[{ label: t('totalUsers'), value: overview?.users ?? 0 }, { label: t('patients'), value: overview?.patients ?? 0 }, { label: t('cliniciansToVerify'), value: overview?.doctors_pending_verification ?? 0 }, { label: t('requestsPendingReview'), value: overview?.submissions_pending_review ?? 0 }].map((stat) => <article className="stat-card" key={stat.label}>
+              <span>{stat.label.toUpperCase()}</span><strong>{stat.value}</strong>
+            </article>)}</div>
+            <div className="section-heading"><div><span className="eyebrow">{t('accessControl')}</span><h2>{t('userManagement')}</h2></div></div>
+            <div className="table-card">
+              <div className="table-header"><div><strong>{t('accounts')}</strong><small>{t('publicRegistrationPatientOnly')}</small><small>{t('verifyCredentialsFirst')}</small></div></div>
+              {adminUsers.length === 0 ? <div className="empty-state"><strong>{t('noAccountsFound')}</strong></div> : <div className="admin-user-list">{adminUsers.map((account) => <article className="admin-user-row" key={account.id}>
+                <div><strong>{account.display_name || account.email}</strong><small>{account.email} · {account.role} · {new Date(account.created_at).toLocaleDateString()}</small>{account.professional_details && <small>{t('credentialDetails')}: {account.professional_details}</small>}</div>
+                <div className="admin-user-actions">{account.role === 'doctor' && <span className={account.is_verified ? 'pill pill-done' : 'pill pill-waiting'}>{account.is_verified ? t('verified') : t('needsVerification')}</span>}{account.role === 'doctor' && !account.is_verified && <button className="button button-outline button-small" disabled={busy} onClick={() => void verifyDoctor(account.id)}>{t('verifyClinician')}</button>}<button className="button button-quiet button-small" disabled={busy} onClick={() => void toggleUser(account)}>{account.is_active ? t('deactivate') : t('activate')}</button></div>
+              </article>)}</div>}
+            </div>
+            <div className="section-heading"><div><span className="eyebrow">{t('accountability')}</span><h2>{t('recentAudit')}</h2></div></div>
+            <div className="table-card">{audit.length === 0 ? <div className="empty-state"><p>{t('noAuditEvents')}</p></div> : audit.map((entry) => <article className="request-row audit-row" key={entry.id}>
+              <span className="request-symbol">≡</span>
+              <div><strong>{entry.action.replace(/_/g, ' ')}</strong><small>{entry.resource_type}{entry.resource_id ? ' · ' + entry.resource_id : ''} · {new Date(entry.created_at).toLocaleString()}</small></div>
+            </article>)}</div>
           </section>}
         </main>
       </div>}
 
-      {shareDialogOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) { setShareDialogOpen(false); setShareToken('') } }}><section className="modal-card share-dialog" role="dialog" aria-modal="true" aria-labelledby="share-dialog-title"><button className="modal-close" type="button" aria-label="Close share dialog" onClick={() => { setShareDialogOpen(false); setShareToken('') }}>×</button><span className="eyebrow">PRIVATE UNTIL YOU SHARE</span><h2 id="share-dialog-title">{t('shareConversation')}</h2><p>{t('shareWarning')}</p><p className="share-permission">Read-only access. The recipient cannot change or reply to your conversation.</p><label className="form-stack">Link expires<select value={shareExpiry} onChange={(event) => setShareExpiry(Number(event.target.value) as 1 | 24 | 168)}><option value={1}>After 1 hour</option><option value={24}>After 24 hours (recommended)</option><option value={168}>After 7 days (maximum)</option></select></label><label className="consent-control share-confirm"><input type="checkbox" checked={shareConfirmed} onChange={(event) => setShareConfirmed(event.target.checked)} /><span>{t('confirmSharing')}</span></label>{shareToken && <div className="share-link-result"><label htmlFor="share-link-output">Share link (shown only once)</label><input id="share-link-output" readOnly value={shareToken} onFocus={(event) => event.currentTarget.select()} /><button className="button button-outline" type="button" onClick={() => void copyShareLink()}>{t('copyLink')}</button></div>}<button className="button button-primary" type="button" onClick={() => void createShareLink()} disabled={busy || !shareConfirmed}>{busy ? t('loading') : t('createShareLink')}</button><div className="share-active-links"><h3>Existing links</h3>{shareLinks.length === 0 ? <p>No links have been created for this conversation.</p> : shareLinks.map((item) => <article key={item.id} className="share-link-row"><div><strong>{item.active ? 'Active' : item.revoked_at ? 'Revoked' : 'Expired'}</strong><small>Expires {new Date(item.expires_at).toLocaleString()}</small></div>{item.active && <button className="button button-quiet button-small" type="button" disabled={busy} onClick={() => void revokeShareLink(item.id)}>{t('revokeLink')}</button>}</article>)}</div></section></div>}
+      {conversationDialog && <div className="modal-backdrop" role="presentation">
+        <section className="modal-card" ref={conversationDialogRef} role="dialog" aria-modal="true" aria-labelledby="conversation-dialog-title">
+          <h2 id="conversation-dialog-title">{conversationDialog.kind === 'rename' ? t('renameDialogTitle') : t('deleteDialogTitle')}</h2>{conversationDialog.kind === 'rename' ? <form className="form-stack" onSubmit={(event) => { event.preventDefault(); void renameChat(conversationDialog.conversation, conversationDialog.title) }}>
+            <label htmlFor="conversation-title">{t('renamePrompt')}</label>
+            <input id="conversation-title" autoFocus maxLength={160} required value={conversationDialog.title} onChange={(event) => setConversationDialog({ ...conversationDialog, title: event.target.value })} />
+            <div className="dialog-actions">
+              <button type="button" className="button button-outline" onClick={() => { setConversationDialog(null); conversationDialogOpener.current?.focus() }}>{t('cancel')}</button>
+              <button type="submit" className="button button-primary" disabled={busy}>{busy ? t('loading') : t('rename')}</button>
+            </div>
+          </form> : <>
+            <p>{t('deleteWarning').replace('{title}', conversationDialog.title)}</p>
+            <div className="dialog-actions">
+              <button type="button" className="button button-outline" onClick={() => { setConversationDialog(null); conversationDialogOpener.current?.focus() }}>{t('cancel')}</button>
+              <button type="button" className="button button-danger" onClick={() => void deleteChat(conversationDialog.conversation)} disabled={busy}>{busy ? t('loading') : t('delete')}</button>
+            </div>
+          </>}</section>
+      </div>}
 
-      <footer className={user ? 'footer workspace-footer' : 'footer'}><span>Ghana Health Assistant</span><span>Health information with clinician oversight</span></footer>
+      {shareDialogOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeShareDialog() }}>
+        <section className="modal-card share-dialog" ref={shareDialogRef} role="dialog" aria-modal="true" aria-labelledby="share-dialog-title" aria-describedby="share-dialog-description">
+          <button className="modal-close" type="button" autoFocus aria-label={t('closeShareDialog')} onClick={closeShareDialog}>×</button>
+          <span className="eyebrow">{t('privateUntilShared')}</span>
+          <h2 id="share-dialog-title">{t('shareConversation')}</h2>
+          <p id="share-dialog-description">{t('shareWarning')}</p>
+          <p className="share-permission">{t('readOnlyAccess')}</p>
+          <label className="form-stack">{t('linkExpires')}<select value={shareExpiry} onChange={(event) => setShareExpiry(Number(event.target.value) as 1 | 24 | 168)}>
+            <option value={1}>{t('oneHour')}</option>
+            <option value={24}>{t('oneDay')}</option>
+            <option value={168}>{t('sevenDays')}</option>
+          </select></label>
+          <label className="consent-control share-confirm">
+            <input type="checkbox" checked={shareConfirmed} onChange={(event) => setShareConfirmed(event.target.checked)} />
+            <span>{t('confirmSharing')}</span>
+          </label>{shareToken && <div className="share-link-result">
+            <label htmlFor="share-link-output">{t('shareLinkShownOnce')}</label>
+            <input id="share-link-output" readOnly value={shareToken} onFocus={(event) => event.currentTarget.select()} />
+            <button className="button button-outline" type="button" onClick={() => void copyShareLink()}>{t('copyLink')}</button>
+          </div>}<button className="button button-primary" type="button" onClick={() => void createShareLink()} disabled={busy || !shareConfirmed}>{busy ? t('loading') : t('createShareLink')}</button>
+          <div className="share-active-links">
+            <h3>{t('existingLinks')}</h3>{shareLinks.length === 0 ? <p>{t('noLinksCreated')}</p> : shareLinks.map((item) => <article key={item.id} className="share-link-row">
+              <div><strong>{item.active ? t('active') : item.revoked_at ? t('revoked') : t('expired')}</strong><small>{t('expires')} {new Date(item.expires_at).toLocaleString()}</small></div>{item.active && <button className="button button-quiet button-small" type="button" disabled={busy} onClick={() => void revokeShareLink(item.id)}>{t('revokeLink')}</button>}</article>)}</div>
+        </section>
+      </div>}
+
+      <footer className={user ? 'footer workspace-footer' : 'footer'}>
+        <span>Ghana Health Assistant</span>
+        <span>{t('footerService')}</span>
+      </footer>
     </div>
   )
 }

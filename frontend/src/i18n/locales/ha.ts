@@ -1,8 +1,3 @@
-// Intentionally blank until reviewed by competent Hausa speakers.
-import type { TranslationKey } from '../resources'
-const ha: Record<TranslationKey, string> = {
-  languageLabel: '', signIn: '', createAccount: '', forgotPassword: '', resetPassword: '', sendResetLink: '',
-  newPassword: '', confirmPassword: '', passwordGuidance: '', resetUnavailable: '', shareConversation: '',
-  shareWarning: '', confirmSharing: '', createShareLink: '', copyLink: '', revokeLink: '', sharedReadOnly: '', unavailable: '', loading: '',
-}
+// Add only translations reviewed by competent Hausa speakers. Missing keys use English fallback.
+const ha = {} as const
 export default ha

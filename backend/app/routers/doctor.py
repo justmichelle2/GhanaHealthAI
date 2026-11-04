@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.database import get_db
 from app.dependencies import require_role
-from app.models import AuditLog, Conversation, User, UserRole
+from app.models import AuditLog, Conversation, ConversationMessage, User, UserRole
 from app.schemas import DoctorReviewItem, DoctorReviewResult, DoctorReviewUpdate
 
 router = APIRouter(prefix="/doctor", tags=["clinician review"])
@@ -66,6 +66,19 @@ def mark_reviewed(
         resource_type="conversation",
         resource_id=str(conversation.id),
     ))
+    patient_response = payload.patient_response.strip()
+    if patient_response:
+        db.add(ConversationMessage(
+            conversation_id=conversation.id,
+            sender_role="doctor",
+            body=patient_response,
+        ))
+        db.add(AuditLog(
+            actor_user_id=doctor.id,
+            action="patient_reply_sent",
+            resource_type="conversation",
+            resource_id=str(conversation.id),
+        ))
     db.commit()
     db.refresh(conversation)
     return conversation
