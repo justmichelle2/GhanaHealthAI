@@ -4,6 +4,62 @@ Design and Development of an AI-Powered Voice-Enabled Multilingual Health Assist
 
 > **Health service status.** This application is not clinically validated. It does not provide diagnosis, treatment, emergency response, or automated medical answers.
 
+## Clone and Setup
+
+### Prerequisites
+- Git
+- Python 3.11+ (with `venv` or `virtualenv`)
+- Node.js 20.19+ or 22.12+
+- PostgreSQL 18
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/your-org/ghanahealthai.git
+cd ghanahealthai
+```
+
+### 2. Backend setup
+**Linux / macOS:**
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env  # edit .env with your PostgreSQL URL and SECRET_KEY
+.venv/bin/python -m alembic upgrade head
+.venv/bin/python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+```
+
+**Windows (PowerShell):**
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env  # edit .env with your PostgreSQL URL and SECRET_KEY
+.venv\Scripts\python -m alembic upgrade head
+.venv\Scripts\python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+```
+
+### 3. Frontend setup
+```bash
+cd ../frontend
+npm install
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+### 4. Create administrator account (first run only)
+**Linux / macOS:**
+```bash
+.venv/bin/python manage_accounts.py create-admin
+```
+**Windows (PowerShell):**
+```powershell
+.venv\Scripts\python.exe manage_accounts.py create-admin
+```
+
+Open your browser at `http://localhost:5173`. The API is available at `http://127.0.0.1:8000` with health check at `http://127.0.0.1:8000/health/ready` and docs at `http://127.0.0.1:8000/docs`.
+
 ## What currently works
 
 - PostgreSQL-backed patient registration and sign-in, hashed passwords, and expiring HttpOnly session cookies.
