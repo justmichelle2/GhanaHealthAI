@@ -68,11 +68,13 @@ Open your browser at `http://localhost:5173`. The API is available at `http://12
 ## What currently works
 
 - PostgreSQL-backed patient registration and sign-in, hashed passwords, and expiring HttpOnly session cookies.
+- Sign-in and password-recovery throttling (rate-limited by email and IP) with generic responses that do not reveal whether an account exists.
 - Patient profile with display name and preference for English, Twi, Ewe, Ga, or Hausa.
 - Patient-owned persistent conversations with consent, search, open, rename, delete, and expiring, revocable read-only share links.
 - Email-based password recovery when an SMTP provider is configured; recovery secrets are single-use and hashed at rest.
 - System, light, and dark themes with saved preference and operating-system tracking.
 - Verified clinician review queue, internal review note, review history, and audit events.
+- Optional patient-visible clinician reply appended to the patient's conversation; internal review notes stay private.
 - Administrator overview, user activation, clinician verification, and recent audit log.
 - Responsive React interface with role-specific workspaces.
 - Installable PWA shell with offline caching for the interface only; API responses are never cached.
@@ -163,7 +165,7 @@ An active administrator can create an unverified clinician account from a truste
 
 This prompts for administrator authentication, clinician details, and an initial password. Verify the clinician’s professional credentials independently before using the administrator dashboard to approve the account. Verification is audited. Only active, verified clinician accounts can open the review API.
 
-Patient messages are stored with explicit consent and may be viewed by authorized clinicians. Clinician review notes are internal and do not create a patient reply. Do not use this service for emergencies or as a substitute for care from a qualified professional.
+Patient messages are stored with explicit consent and may be viewed by authorized clinicians. A clinician can record an internal review note (never shown to the patient) and optionally send a patient-visible reply that is appended to the patient's conversation as a `doctor` message. The application does not generate that reply automatically. Do not use this service for emergencies or as a substitute for care from a qualified professional.
 
 ## Database changes
 
@@ -174,6 +176,7 @@ Alembic revisions are additive and preserve existing accounts and submissions. A
 From frontend:
 
 ~~~powershell
+npm test
 npm run build
 npx tsc -b --pretty false
 npm run lint
@@ -196,4 +199,14 @@ From backend:
 - English is the only complete interface resource; Twi, Ewe, Ga and Hausa strings need competent-speaker and clinical review. The interface falls back to English for missing translations.
 - Production deployment still needs HTTPS, deployment secrets, reviewed consent/privacy policy, clinical governance, backup/restore operations, and security review.
 
-Speech model coverage, licensing, device constraints, and evaluation recommendations are in docs/SPEECH_EVALUATION.md.
+## Documentation
+
+- `docs/ARCHITECTURE.md` — implemented components, data model, and planned (not implemented) design.
+- `docs/PASSWORD_RECOVERY.md` — recovery flow and SMTP configuration.
+- `docs/PRODUCTION_READINESS.md` — deployment runbook and required configuration.
+- `docs/SECURITY_REVIEW.md` — security considerations and release checklist.
+- `docs/SPEECH_EVALUATION.md` — speech model coverage, licensing, device constraints, and evaluation recommendations.
+- `docs/TRANSLATION_REVIEW.md` — language catalog status and speaker/clinical review process.
+- `docs/policies/` — draft privacy, consent, retention, clinician-review, and incident-response policies for professional review.
+- `IMPLEMENTATION_STATUS.md` — feature-by-feature status and verification results.
+- `UI_SPEC.md` and `UI_AUDIT.md` — interface contract and current UI/UX audit.
