@@ -14,8 +14,8 @@ Design and Development of an AI-Powered Voice-Enabled Multilingual Health Assist
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/your-org/ghanahealthai.git
-cd ghanahealthai
+git clone https://github.com/justmichelle2/GhanaHealthAI.git
+cd GhanaHealthAI
 ```
 
 ### 2. Backend setup
@@ -41,20 +41,25 @@ copy .env.example .env  # edit .env with your PostgreSQL URL and SECRET_KEY
 .venv\Scripts\python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
+Leave the backend server running. Open a second terminal from the repository root to start the frontend:
+
 ### 3. Frontend setup
 ```bash
-cd ../frontend
+cd frontend
 npm install
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
 ### 4. Create administrator account (first run only)
+Open another terminal from the repository root and run:
 **Linux / macOS:**
 ```bash
+cd backend
 .venv/bin/python manage_accounts.py create-admin
 ```
 **Windows (PowerShell):**
 ```powershell
+cd backend
 .venv\Scripts\python.exe manage_accounts.py create-admin
 ```
 
@@ -74,7 +79,7 @@ Open your browser at `http://localhost:5173`. The API is available at `http://12
 
 Messages are saved for clinician review. The application does not generate AI answers, transcribe speech, synthesize speech, or perform triage.
 
-## Local setup
+## Detailed Windows setup
 
 Requirements: Windows, Python 3.11+, Node.js 20.19+ or 22.12+, PostgreSQL 18, and PowerShell.
 
