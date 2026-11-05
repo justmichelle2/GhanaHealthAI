@@ -862,8 +862,8 @@ function App() {
                       <div className={`chat-header-search-field${chatSearchExpanded ? ' expanded' : ''}`}>
                         <Icon name="search" size={16} className="search-icon" />
                         <input type="search" value={chatSearch} onChange={(event) => void searchChats(event.target.value)} placeholder={t('searchTitles')} />
+                        {chatSearch && <button className="icon-button chat-search-clear" type="button" onClick={() => void setChatSearch('')} aria-label={t('clearSearch')}>×</button>}
                       </div>
-                      <button className="icon-button chat-search-clear" type="button" onClick={() => void setChatSearch('')} aria-label={t('clearSearch')}>×</button>
                     </div>
                     <button className="icon-button" onClick={() => void shareChat(selectedChat)} disabled={!selectedChat} aria-label={t('shareConversation')}><Icon name="share" size={18} /></button>
                   </div>
