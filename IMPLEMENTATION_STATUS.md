@@ -21,7 +21,7 @@ The product stores patient messages for clinician review. It does **not** provid
 | Administrator controls | COMPLETE | `backend/app/routers/admin.py`, `frontend/src/App.tsx` | Activation, clinician verification, audit log, last-admin protection. |
 | Secure read-only sharing | COMPLETE | `backend/app/routers/patient.py`, `frontend/src/App.tsx` | Random token, hashed at rest, expiry, revocation, no-store/noindex, rate limited. |
 | PWA shell | PARTIALLY COMPLETE | `frontend/public/*`, `frontend/src/main.tsx` | Installable shell; production SW caching only, API never cached. Icons are SVG only. |
-| Multilingual UI | PARTIALLY COMPLETE | `frontend/src/i18n/*`, `frontend/src/App.tsx` | English catalog covers every screen with 182 keys. Twi/Ewe/Ga/Hausa catalogs remain intentionally empty pending competent-speaker and clinical/legal review, so reviewed text can later be added without code changes. |
+| Multilingual UI | PARTIALLY COMPLETE | `frontend/src/i18n/*`, `frontend/src/App.tsx` | English catalog covers every screen with 183 keys. Twi/Ewe/Ga/Hausa catalogs remain intentionally empty pending competent-speaker and clinical/legal review, so reviewed text can later be added without code changes. |
 | Automated AI health answers | BLOCKED BY EXTERNAL DEPENDENCY | — | No approved model/provider, credentials, source corpus, safeguards or clinical sign-off. |
 | Speech recognition / TTS | BLOCKED BY EXTERNAL DEPENDENCY | `docs/SPEECH_EVALUATION.md` | No installed model or rights-cleared benchmark. Controls disabled honestly. |
 | Clinical triage rules | BLOCKED BY EXTERNAL DEPENDENCY | — | No clinically approved rules. |
@@ -38,6 +38,15 @@ The product stores patient messages for clinician review. It does **not** provid
 7. Login had no brute-force throttling. A per-email/per-IP limit was added.
 8. `manifest.webmanifest` and `index.html` used an old background colour. They now use the design token colour.
 
+## Frontend refactor (2026-11-05)
+
+- Replaced the three competing stylesheets (`index.css`, `responsive-dark.css`, `share.css`) with one layered system under `frontend/src/styles/`: `tokens.css` (semantic light/dark tokens, reset, focus, skip link), `components.css` (single component layer), and `responsive.css` (1100/900/768/640/420 breakpoints). Production CSS fell from 91.3 kB to 38.7 kB.
+- Removed the duplicate dark-theme definitions and legacy dead CSS. Theme changes are now driven only by `html[data-theme='dark']`.
+- Simplified the chat workspace: deleted the duplicated page heading, merged the status title/language/share controls into one compact header, replaced the large empty-state and unavailable-answer cards with a small icon empty state and a one-line notice, removed the unavailable microphone/voice note, and widened the composer so the conversation owns the available space.
+- Replaced text glyphs (`☰ ✎ ↗ × ＋ → ◷ ▦`) with the accessible SVG `Icon` component; added `Button` and `Alert` primitives and reused them in the chat composer, dialogs and feedback banners.
+- Replaced the decorative landing orbit with a compact `.landing-summary` card so the landing markup matches the new stylesheet.
+- Added Vitest + Testing Library + jsdom. `npm test` now runs the UI suite and the existing i18n suite.
+
 ## Verification commands
 
 ```powershell
@@ -50,11 +59,11 @@ npm run build
 npm run lint
 ```
 
-Last run: backend **12 passed**; frontend **4 passed**, production build succeeded, ESLint reported no problems.
+Last run: backend **12 passed**; frontend **8 passed** (4 Vitest UI + 4 `node:test` i18n), production build succeeded, ESLint reported no problems.
 
 ## Remaining work
 
 - Competent-speaker and clinical/legal review of every non-English string (`docs/TRANSLATION_REVIEW.md`).
-- Browser screenshot matrix at 360/390/768/1024/1280/1440 widths (no automated browser harness is installed in this repo).
+- Browser screenshot matrix at 360/390/768/1024/1280/1440 widths. jsdom tests cover structure and behaviour, but no Playwright/browser harness is installed, so rendered layout and contrast have not been verified in a real browser.
 - A designed, clinician-approved AI answer pipeline and speech models; currently blocked.
 - Production infrastructure, HTTPS, SMTP, backups, monitoring and emergency escalation ownership.

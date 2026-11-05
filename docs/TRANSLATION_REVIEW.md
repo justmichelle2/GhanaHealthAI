@@ -1,6 +1,6 @@
 # Translation Review Matrix
 
-**Release gate: NOT READY.** English is the complete source catalog in `frontend/src/i18n/locales/en.ts` (182 keys). Twi (`tw`), Ewe (`ee`), Ga (`gaa`) and Hausa (`ha`) use sparse resources and currently have no reviewed entries, so the application falls back to English. Every patient, authentication, recovery, clinician and administrator screen now uses translation keys, so reviewed strings will appear without further code changes. This interface must not be described as fully translated.
+**Release gate: NOT READY.** English is the complete source catalog in `frontend/src/i18n/locales/en.ts` (183 keys). Twi (`tw`), Ewe (`ee`), Ga (`gaa`) and Hausa (`ha`) use sparse resources and currently have no reviewed entries, so the application falls back to English. Every patient, authentication, recovery, clinician and administrator screen now uses translation keys, so reviewed strings will appear without further code changes. This interface must not be described as fully translated.
 
 The translated interface is incomplete by design: the four non-English catalogs are intentionally empty until a competent speaker supplies reviewed text. The language selector shows a coverage notice whenever a non-English interface language is selected, and the safety-critical text falls back to English rather than being guessed.
 
@@ -17,6 +17,7 @@ Each non-English entry needs translation by a competent speaker, independent rev
 | registrationAcknowledgement | I understand that account details are stored and that each message is stored only if I consent before sending it. | Pending | Pending | Pending | Pending | Privacy/legal review required |
 | accountDataNotice | Your account details are stored to provide this service. A message is stored only after you give consent before sending it. | Pending | Pending | Pending | Pending | Privacy/legal review required |
 | consentToStoreMessage | I consent to storing this message for clinician review. Do not include details about emergencies; contact local emergency services. | Pending | Pending | Pending | Pending | Clinical/privacy review required |
+| chatNotice | Saved for clinician review. Automated answers are unavailable. | Pending | Pending | Pending | Pending | Clinical review required |
 | healthServiceNotice | This application is not clinically validated and does not provide diagnosis or treatment. Contact a qualified health professional for care. | Pending | Pending | Pending | Pending | Clinical review required |
 | healthInfoTitle | Health information | Pending | Pending | Pending | Pending | Clinical review required |
 | howStepMessageBody | Before sending, review the storage notice and give consent for that message. | Pending | Pending | Pending | Pending | Privacy/legal review required |

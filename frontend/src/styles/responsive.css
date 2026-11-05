@@ -1,0 +1,107 @@
+/*
+ * Ghana Health Assistant — responsive rules.
+ * Breakpoints: 1100 (tablet density), 768 (mobile transition), 420 (small phone).
+ */
+
+@media (max-width: 1100px) {
+  .workspace,
+  .workspace.chat-workspace { grid-template-columns: 250px minmax(0, 1fr); }
+  .workspace.sidebar-collapsed { grid-template-columns: var(--sidebar-collapsed-width) minmax(0, 1fr); }
+  .main-content { padding: 24px; }
+  .landing { gap: 28px; }
+  .auth-layout { grid-template-columns: minmax(0, 1fr) minmax(440px, 500px); gap: 36px; }
+}
+
+@media (max-width: 900px) {
+  .workspace,
+  .workspace.chat-workspace,
+  .workspace.chat-workspace.sidebar-collapsed { grid-template-columns: 230px minmax(0, 1fr); }
+  .action-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+  .settings-grid { grid-template-columns: 1fr; }
+  .how-grid { gap: var(--space-4); }
+}
+
+@media (max-width: 768px) {
+  .public-nav { display: none; }
+
+  .app-root.authenticated { height: 100dvh; }
+  .app-root.authenticated > .topbar { flex-basis: 64px; min-height: 64px; padding-inline: 14px; }
+  .workspace { position: relative; display: block; height: calc(100dvh - 64px); overflow: hidden; }
+
+  .mobile-only { display: grid; }
+  .app-menu-button { display: grid; }
+
+  .sidebar {
+    position: fixed;
+    z-index: 30;
+    top: 64px;
+    bottom: 0;
+    left: 0;
+    width: min(86vw, 320px);
+    height: auto;
+    padding: var(--space-4);
+    overflow-y: auto;
+    transform: translateX(-105%);
+    transition: transform var(--transition-fast);
+    box-shadow: 14px 0 38px rgb(2 6 23 / 30%);
+  }
+  .workspace.sidebar-open .sidebar { transform: translateX(0); }
+  .workspace.sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }
+  .workspace.sidebar-collapsed .nav-label,
+  .workspace.sidebar-collapsed .sidebar-brand strong,
+  .workspace.sidebar-collapsed .sidebar-role > div,
+  .workspace.sidebar-collapsed .chat-history-section { display: block; }
+  .workspace.sidebar-collapsed .nav-item { justify-content: flex-start; padding-inline: var(--space-3); }
+  .workspace.sidebar-collapsed .nav-item > span:first-child { width: 20px; }
+  .sidebar-collapse { display: none; }
+  .app-drawer-backdrop { position: fixed; z-index: 25; inset: 64px 0 0; display: block; border: 0; background: rgb(2 6 23 / 55%); }
+
+  .main-content { padding: 18px 16px; }
+  .main-content:has(.chat-page) { padding: 12px; }
+
+  .page-heading { align-items: flex-start; flex-direction: column; }
+  .page-heading .button { align-self: stretch; }
+  .status-banner { align-items: flex-start; flex-wrap: wrap; }
+  .action-grid, .stat-grid { grid-template-columns: 1fr; }
+
+  .chat-header { min-height: 54px; padding: var(--space-2) var(--space-3); }
+  .chat-language select { min-width: 96px; max-width: 140px; }
+  .chat-body { padding: var(--space-4) var(--space-3); }
+  .chat-message { max-width: 90%; padding: var(--space-3); }
+  .chat-composer { grid-template-columns: minmax(0, 1fr) auto; padding: var(--space-3); gap: var(--space-2); }
+  .chat-composer .button { min-width: 76px; }
+
+  .landing,
+  .auth-layout,
+  .footer { width: calc(100% - 32px); }
+  .landing { min-height: 0; grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .landing h1 { font-size: clamp(2rem, 8vw, 2.8rem); }
+  .landing-summary { padding: var(--space-5); }
+  .public-cta { flex-direction: column; align-items: flex-start; }
+  .auth-layout { min-height: 0; grid-template-columns: 1fr; gap: 20px; }
+  .auth-aside { padding-right: 0; padding-bottom: var(--space-4); border-right: 0; border-bottom: 1px solid var(--border); }
+  .auth-aside-note { display: none; }
+  .auth-panel { max-width: none; justify-self: stretch; }
+
+  .admin-user-row { align-items: flex-start; flex-direction: column; }
+  .admin-user-actions { justify-content: flex-start; }
+}
+
+@media (max-width: 640px) {
+  .modal-card { padding: var(--space-5) var(--space-4); }
+  .dialog-actions { flex-wrap: wrap; }
+  .dialog-actions .button { flex: 1 1 auto; }
+  .share-link-row { align-items: flex-start; }
+}
+
+@media (max-width: 420px) {
+  .app-root:not(.authenticated) > .topbar { padding-inline: 12px; }
+  .topbar-right { gap: var(--space-1); }
+  .topbar-right > .theme-control:first-of-type { display: none; }
+  .topbar-right .button { min-height: 34px; padding-inline: var(--space-2); font-size: 12px; }
+  .brand-copy strong { font-size: 14px; }
+  .session-badge { display: none; }
+
+  .landing, .auth-layout, .footer { width: calc(100% - 28px); }
+  .chat-composer .button { min-width: 64px; padding-inline: var(--space-2); }
+}

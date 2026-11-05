@@ -118,6 +118,7 @@ const en = {
   healthAssistant: 'Health assistant', newConversation: 'New conversation', privateConversation: 'Private conversation',
   healthConversation: 'Health conversation', awaitingReview: 'Awaiting clinician review', reviewedByClinician: 'Reviewed by clinician',
   savedForReview: 'Messages you submit are saved for clinician review. Automated health answers are unavailable.',
+  chatNotice: 'Saved for clinician review. Automated answers are unavailable.',
   noAutomatedAnswer: 'No automated answer is available.',
   askHealthQuestion: 'Ask a health question',
   chatEmptyBody: 'You can submit a message for clinician review. This service does not generate medical answers.',

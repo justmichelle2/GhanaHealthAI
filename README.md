@@ -209,4 +209,5 @@ From backend:
 - `docs/TRANSLATION_REVIEW.md` — language catalog status and speaker/clinical review process.
 - `docs/policies/` — draft privacy, consent, retention, clinician-review, and incident-response policies for professional review.
 - `IMPLEMENTATION_STATUS.md` — feature-by-feature status and verification results.
+- `FRONTEND_REFACTOR.md` — stylesheet consolidation, compact chat workspace, icon layer, and UI test setup.
 - `UI_SPEC.md` and `UI_AUDIT.md` — interface contract and current UI/UX audit.

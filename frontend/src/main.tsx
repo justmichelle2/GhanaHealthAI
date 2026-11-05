@@ -1,9 +1,9 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.tsx'
-import './index.css'
-import './share.css'
-import './responsive-dark.css'
+import './styles/tokens.css'
+import './styles/components.css'
+import './styles/responsive.css'
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
