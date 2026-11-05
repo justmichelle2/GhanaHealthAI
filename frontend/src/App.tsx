@@ -133,6 +133,7 @@ function App() {
   const consentDialogRef = useRef<HTMLElement>(null)
   const consentFocusGuard = useRef(false)
   const bootHashRef = useRef(window.location.hash)
+  const [avatarMenuOpen, setAvatarMenuOpen] = useState(false)
 
   useEffect(() => {
     if (selectedChat && chatBodyRef.current) chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight
@@ -592,13 +593,20 @@ function App() {
         <label className="theme-control">
           <span className="sr-only">{t('languageLabel')}</span>
           <select aria-label={t('languageLabel')} value={interfaceLanguage} onChange={(event) => setInterfaceLanguage(event.target.value as InterfaceLanguage)}>{LANGUAGES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
-        </label>{user ? <>
+        </label>        {user ? <>
           <span className="session-badge"><i /> {t('secureSession')}</span>
-          <button className="topbar-avatar-button" onClick={() => navigate('profile')} aria-label={`${displayName}, ${roleName}, ${t('openProfile')}`} title={`${displayName}, ${roleName}`}><span className="topbar-avatar">{userInitial}</span></button>
-          <button className="button button-outline button-small" onClick={() => void logout()} disabled={busy}>{t('signOut')}</button>
+          <button className="topbar-avatar-button" type="button" onClick={() => setAvatarMenuOpen((v) => !v)} aria-haspopup="menu" aria-expanded={avatarMenuOpen} aria-label={`${displayName}, ${roleName}, ${t('openProfile')}`} title={`${displayName}, ${roleName}`}><span className="topbar-avatar">{userInitial}</span></button>
+          <button className="button button-outline button-small sign-out-button" type="button" onClick={() => void logout()} disabled={busy}>{t('signOut')}</button>
+          {avatarMenuOpen && <div className="avatar-menu" role="menu">
+            <button type="button" role="menuitem" onClick={() => { setAvatarMenuOpen(false); navigate('profile'); }}>{t('profileAndSettings')}</button>
+            <button type="button" role="menuitem" onClick={() => { setAvatarMenuOpen(false); setThemeMode('light'); }}>{t('lightTheme')}</button>
+            <button type="button" role="menuitem" onClick={() => { setAvatarMenuOpen(false); setThemeMode('dark'); }}>{t('darkTheme')}</button>
+            <button type="button" role="menuitem" onClick={() => { setAvatarMenuOpen(false); setInterfaceLanguage('en'); }}>{LANGUAGES.find((item) => item.value === interfaceLanguage)?.label || interfaceLanguage}</button>
+            <button type="button" role="menuitem" onClick={() => { setAvatarMenuOpen(false); void logout(); }}>{t('signOut')}</button>
+          </div>}
         </> : !['login', 'register', 'forgot', 'reset', 'shared'].includes(page) && <>
-          <button className="button button-quiet" onClick={() => beginAuth('login')}>{t('signIn')}</button>
-          <button className="button button-primary button-small" onClick={() => beginAuth('register')}>{t('createAccount')}</button>
+          <button className="button button-quiet" type="button" onClick={() => beginAuth('login')}>{t('signIn')}</button>
+          <button className="button button-primary button-small" type="button" onClick={() => beginAuth('register')}>{t('createAccount')}</button>
         </>}
         </div>
       </header>
@@ -872,7 +880,7 @@ function App() {
                 </div>}</div>
                 <form className="chat-composer" onSubmit={(event) => void sendChatMessage(event)}>
                   <textarea ref={composerRef} rows={2} value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} onFocus={() => { if (!storeConsent && !consentFocusGuard.current) openConsentModal(composerRef.current) }} maxLength={4000} minLength={5} required aria-label={t('messagePlaceholder')} placeholder={t('messagePlaceholder')} />
-                  <Button type="submit" disabled={sendingRequest || messageDraft.trim().length < 5} icon={<Icon name="send" size={18} />}>{sendingRequest ? t('saving') : t('send')}</Button>
+                  <Button type="submit" disabled={sendingRequest || messageDraft.trim().length < 5} icon={<Icon name="send" size={18} />}><span className="send-text">{sendingRequest ? t('saving') : t('send')}</span></Button>
                 </form>
               </div>
             </div>
