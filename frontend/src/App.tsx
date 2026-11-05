@@ -5,7 +5,7 @@ import { Alert } from './components/ui/Alert'
 import { Button } from './components/ui/Button'
 
 type User = { id: string; email: string; role: 'patient' | 'doctor' | 'admin'; is_active: boolean; created_at: string }
-type Profile = { full_name: string | null; preferred_language: string | null }
+type Profile = { full_name: string | null; preferred_language: string | null; messages_consent_given_at: string | null }
 type Conversation = { id: string; title: string; preferred_language: string; status: string; created_at: string; updated_at: string }
 type ChatMessage = { id: string; sender_role: string; body: string; created_at: string }
 type ConversationDetail = Conversation & { messages: ChatMessage[] }
@@ -74,7 +74,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 function App() {
   const [page, setPage] = useState<Page>('loading')
   const [user, setUser] = useState<User | null>(null)
-  const [profile, setProfile] = useState<Profile>({ full_name: null, preferred_language: 'en' })
+  const [profile, setProfile] = useState<Profile>({ full_name: null, preferred_language: 'en', messages_consent_given_at: null })
   const [submissions, setSubmissions] = useState<Conversation[]>([])
   const [chatResults, setChatResults] = useState<Conversation[]>([])
   const [pending, setPending] = useState<Review[]>([])
@@ -110,6 +110,9 @@ function App() {
   const [replies, setReplies] = useState<Record<string, string>>({})
   const [messageDraft, setMessageDraft] = useState('')
   const [storeConsent, setStoreConsent] = useState(false)
+  const [consentModalOpen, setConsentModalOpen] = useState(false)
+  const [consentChecked, setConsentChecked] = useState(false)
+  const [chatSearchExpanded, setChatSearchExpanded] = useState(false)
   const [sendingRequest, setSendingRequest] = useState(false)
   const [selectedChat, setSelectedChat] = useState<ConversationDetail | null>(null)
   const [chatSearch, setChatSearch] = useState('')
@@ -126,6 +129,9 @@ function App() {
   const conversationDialogRef = useRef<HTMLElement>(null)
   const shareDialogOpener = useRef<HTMLElement | null>(null)
   const shareDialogRef = useRef<HTMLElement>(null)
+  const consentDialogOpener = useRef<HTMLElement | null>(null)
+  const consentDialogRef = useRef<HTMLElement>(null)
+  const consentFocusGuard = useRef(false)
   const bootHashRef = useRef(window.location.hash)
 
   useEffect(() => {
@@ -177,6 +183,27 @@ function App() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [shareDialogOpen])
+
+  useEffect(() => {
+    if (!consentModalOpen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { closeConsentModal(); return }
+      if (event.key === 'Tab' && consentDialogRef.current) {
+        const controls = [...consentDialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled])')]
+        if (controls.length < 2) return
+        const first = controls[0], last = controls[controls.length - 1]
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+      }
+    }
+    const container = consentDialogRef.current
+    if (container) {
+      const firstFocusable = container.querySelector<HTMLElement>('input:not([disabled]), button:not([disabled])')
+      firstFocusable?.focus()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [consentModalOpen])
 
   useEffect(() => {
     localStorage.setItem('gha-theme', themeMode)
@@ -237,7 +264,7 @@ function App() {
     const [saved, history] = await Promise.all([
       request<Profile>('/patient/profile'), request<Conversation[]>('/patient/conversations'),
     ])
-    setProfile(saved); setFullName(saved.full_name || ''); setLanguage(saved.preferred_language || 'en'); setSubmissions(history); setChatResults(history); setPage('dashboard')
+    setProfile(saved); setFullName(saved.full_name || ''); setLanguage(saved.preferred_language || 'en'); setStoreConsent(!!saved.messages_consent_given_at); setSubmissions(history); setChatResults(history); setPage('dashboard')
   }
 
   useEffect(() => {
@@ -350,11 +377,11 @@ function App() {
     finally { setChatBusy(false) }
   }
 
-  function newChat() { setSelectedChat(null); setMessageDraft(''); setStoreConsent(false); setPage('assistant'); setChatDrawerOpen(false); setError(''); setSuccess('') }
+  function newChat() { setSelectedChat(null); setMessageDraft(''); setPage('assistant'); setChatDrawerOpen(false); setError(''); setSuccess('') }
 
   async function sendChatMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(''); setSuccess('')
-    if (!storeConsent) { setError(t('consentRequired')); return }
+    if (!storeConsent) { openConsentModal(composerRef.current); return }
     const message = messageDraft.trim()
     if (message.length < 5) { setError(t('invalidForm')); return }
     setSendingRequest(true)
@@ -365,10 +392,38 @@ function App() {
       setSelectedChat(saved)
       setSubmissions((items) => [saved, ...items.filter((item) => item.id !== saved.id)])
       setChatResults((items) => [saved, ...items.filter((item) => item.id !== saved.id)])
-      setMessageDraft(''); setStoreConsent(false)
+      setMessageDraft('')
       setSuccess(t('messagesSaved'))
     } catch (reason) { setError(describeError(reason, 'unableSaveMessage')) }
     finally { setSendingRequest(false) }
+  }
+
+  function openConsentModal(opener: HTMLElement | null) {
+    consentDialogOpener.current = (opener || document.activeElement) as HTMLElement | null
+    setConsentChecked(false)
+    setConsentModalOpen(true)
+  }
+
+  function closeConsentModal() {
+    consentFocusGuard.current = true
+    setConsentModalOpen(false)
+    window.setTimeout(() => { consentDialogOpener.current?.focus(); consentFocusGuard.current = false }, 0)
+  }
+
+  async function acceptConsent() {
+    if (!consentChecked) return
+    await updateMessageConsent(true)
+    setConsentModalOpen(false)
+    window.setTimeout(() => consentDialogOpener.current?.focus(), 0)
+  }
+
+  async function updateMessageConsent(consent: boolean) {
+    try {
+      const saved = await request<Profile>('/patient/profile/consent', { method: 'PATCH', body: JSON.stringify({ consent }) })
+      setProfile(saved)
+      setStoreConsent(!!saved.messages_consent_given_at)
+      setSuccess(consent ? t('consentUpdated') : t('consentWithdrawn'))
+    } catch (reason) { setError(describeError(reason, 'unableSaveConsent')) }
   }
 
   async function searchChats(value: string) {
@@ -495,6 +550,7 @@ function App() {
 
   const languageName = (value: string) => LANGUAGES.find((item) => item.value === value)?.label || value.toUpperCase()
   const displayName = profile.full_name || user?.email.split('@')[0] || 'there'
+  const userInitial = (displayName[0] || '?').toUpperCase()
   const roleName = user ? (user.role === 'patient' ? t('patient') : user.role === 'doctor' ? t('clinician') : t('adminRole')) : ''
   const patientNav: { key: 'dashboard' | 'assistant' | 'profile'; label: string; icon: IconName }[] = [
     { key: 'dashboard', label: t('overviewNav'), icon: 'home' },
@@ -506,33 +562,6 @@ function App() {
     { key: 'yesterday', label: t('yesterday') },
     { key: 'previous', label: t('previousDays') },
   ]
-  const conversationHistory = <div className="chat-history-section">
-    <div className="chat-history-title">{t('conversations')}</div>
-    <button className="button button-primary chat-new-button" onClick={newChat}><Icon name="plus" size={18} /> {t('newChat')}</button>
-    <label className="chat-search">
-      <span>{t('searchConversations')}</span>
-      <input type="search" value={chatSearch} onChange={(event) => void searchChats(event.target.value)} placeholder={t('searchTitles')} />
-    </label>
-    <div className="chat-history-list">{chatResults.length === 0 ? <div className="chat-empty">
-      <strong>{chatSearch ? t('noMatchingConversations') : t('noConversations')}</strong>
-      <p>{chatSearch ? t('tryDifferentTitle') : t('savedMessagesAppear')}</p>
-    </div> : conversationGroups.map((group) => {
-      const groupItems = chatResults.filter((item) => conversationDateGroup(item.updated_at || item.created_at) === group.key)
-      return groupItems.length ? <div className="chat-history-group" key={group.key}>
-        <strong>{group.label}</strong>{groupItems.map((item) => <article className={selectedChat?.id === item.id ? 'chat-history-item selected' : 'chat-history-item'} key={item.id}>
-          <button onClick={() => void openChat(item.id)}>
-            <strong>{item.title || t('healthConversation')}</strong>
-            <small>{item.status === 'pending_review' ? t('pending') : t('reviewed')}</small>
-          </button>
-          <div>
-            <button className="icon-button" aria-label={`${t('rename')} ${item.title}`} onClick={(event) => { conversationDialogOpener.current = event.currentTarget; setConversationDialog({ kind: 'rename', conversation: item, title: item.title }) }}><Icon name="edit" size={16} /></button>
-            <button className="icon-button" aria-label={`${t('shareConversation')} ${item.title}`} onClick={() => void shareSavedChat(item)}><Icon name="share" size={16} /></button>
-            <button className="icon-button danger-icon" aria-label={`${t('delete')} ${item.title}`} onClick={(event) => { conversationDialogOpener.current = event.currentTarget; setConversationDialog({ kind: 'delete', conversation: item, title: item.title }) }}><Icon name="trash" size={16} /></button>
-          </div>
-        </article>)}</div> : null
-    })}</div>
-    <div className="chat-sidebar-note">{t('yourConversationsPrivate')}</div>
-  </div>
 
   return (
     <div className={user ? 'app-root authenticated' : 'app-root'}>
@@ -543,7 +572,11 @@ function App() {
             <strong>Ghana Health</strong>
             <small className="brand-copy-sub">ASSISTANT</small>
           </span>
-        </a>
+        </a>{user && (
+          <button className="icon-button topbar-collapse desktop-only" onClick={() => setSidebarCollapsed((collapsed) => !collapsed)} aria-label={sidebarCollapsed ? t('expandSidebar') : t('collapseSidebar')}>
+            <Icon name={sidebarCollapsed ? 'chevron-right' : 'chevron-left'} size={18} />
+          </button>
+        )}
         <div className="topbar-right">{!user && page === 'landing' && <nav className="public-nav" aria-label={t('mainNavigation')}>
           <a href="#about">{t('publicAbout')}</a>
           <a href="#how-it-works">{t('publicHow')}</a>
@@ -561,7 +594,7 @@ function App() {
           <select aria-label={t('languageLabel')} value={interfaceLanguage} onChange={(event) => setInterfaceLanguage(event.target.value as InterfaceLanguage)}>{LANGUAGES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
         </label>{user ? <>
           <span className="session-badge"><i /> {t('secureSession')}</span>
-          <span className="user-chip">{user.role === 'patient' ? displayName : user.email}</span>
+          <button className="topbar-avatar-button" onClick={() => navigate('profile')} aria-label={`${displayName}, ${roleName}, ${t('openProfile')}`} title={`${displayName}, ${roleName}`}><span className="topbar-avatar">{userInitial}</span></button>
           <button className="button button-outline button-small" onClick={() => void logout()} disabled={busy}>{t('signOut')}</button>
         </> : !['login', 'register', 'forgot', 'reset', 'shared'].includes(page) && <>
           <button className="button button-quiet" onClick={() => beginAuth('login')}>{t('signIn')}</button>
@@ -724,32 +757,46 @@ function App() {
       {user && <div className={`workspace ${user.role === 'patient' ? 'chat-workspace' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${chatDrawerOpen ? 'sidebar-open' : ''}`}>
         {chatDrawerOpen && <button className="app-drawer-backdrop mobile-only" aria-label={t('closeNavigation')} onClick={() => setChatDrawerOpen(false)} />}
         <aside className="sidebar">
-          <div className="sidebar-brand">
-            <span className="brand-mark">+</span>
-            <strong>Ghana Health</strong>
-            <button className="sidebar-collapse" onClick={() => setSidebarCollapsed((collapsed) => !collapsed)} aria-label={sidebarCollapsed ? t('expandSidebar') : t('collapseSidebar')}><Icon name={sidebarCollapsed ? 'chevron-right' : 'chevron-left'} size={18} /></button>
-          </div>
-          <div className="sidebar-role">
-            <span className="role-avatar">{user.role === 'patient' ? (displayName[0] || 'P').toUpperCase() : user.role === 'doctor' ? 'C' : 'A'}</span>
-            <div>
-              <strong>{user.role === 'patient' ? displayName : user.role === 'doctor' ? t('clinicianWorkspace') : t('administration')}</strong>
-              <small>{user.role === 'doctor' ? t('verifiedReviewer') : roleName.toUpperCase()}</small>
+          <div className="sidebar-inner">
+            {user.role === 'patient' && (
+              <button className="button button-primary button-full chat-new-button" onClick={newChat}><Icon name="plus" size={18} /> {t('newChat')}</button>
+            )}
+            {user.role === 'patient' && <nav className="side-nav" aria-label={t('patientNavigation')}>{patientNav.map((item) => <button key={item.key} className={page === item.key ? 'nav-item active' : 'nav-item'} onClick={() => navigate(item.key)} aria-current={page === item.key ? 'page' : undefined} aria-label={item.label}>
+              <Icon name={item.icon} size={20} /><span className="nav-label">{item.label}</span>
+            </button>)}</nav>}
+            {user.role === 'doctor' && <nav className="side-nav" aria-label={t('clinicianNavigation')}>
+              <button className="nav-item active" aria-current="page"><Icon name="clock" size={20} /><span className="nav-label">{t('reviewWorkspace')}</span></button>
+            </nav>}
+            {user.role === 'admin' && <nav className="side-nav" aria-label={t('administratorNavigation')}>
+              <button className="nav-item active" aria-current="page"><Icon name="grid" size={20} /><span className="nav-label">{t('administration')}</span></button>
+            </nav>}
+            {user.role === 'patient' && page === 'assistant' && (
+              <div className="chat-history-section">
+                <div className="chat-history-list">{chatResults.length === 0 ? <div className="chat-empty">
+                  <strong>{chatSearch ? t('noMatchingConversations') : t('noConversations')}</strong>
+                  <p>{chatSearch ? t('tryDifferentTitle') : t('savedMessagesAppear')}</p>
+                </div> : conversationGroups.map((group) => {
+                  const groupItems = chatResults.filter((item) => conversationDateGroup(item.updated_at || item.created_at) === group.key)
+                  return groupItems.length ? <div className="chat-history-group" key={group.key}>
+                    <strong>{group.label}</strong>{groupItems.map((item) => <article className={selectedChat?.id === item.id ? 'chat-history-item selected' : 'chat-history-item'} key={item.id}>
+                      <button onClick={() => void openChat(item.id)}>
+                        <strong>{item.title || t('healthConversation')}</strong>
+                        <small>{item.status === 'pending_review' ? t('pending') : t('reviewed')}</small>
+                      </button>
+                      <div>
+                        <button className="icon-button" aria-label={`${t('rename')} ${item.title}`} onClick={(event) => { conversationDialogOpener.current = event.currentTarget; setConversationDialog({ kind: 'rename', conversation: item, title: item.title }) }}><Icon name="edit" size={16} /></button>
+                        <button className="icon-button" aria-label={`${t('shareConversation')} ${item.title}`} onClick={() => void shareSavedChat(item)}><Icon name="share" size={16} /></button>
+                        <button className="icon-button danger-icon" aria-label={`${t('delete')} ${item.title}`} onClick={(event) => { conversationDialogOpener.current = event.currentTarget; setConversationDialog({ kind: 'delete', conversation: item, title: item.title }) }}><Icon name="trash" size={16} /></button>
+                      </div>
+                    </article>)}</div> : null
+                  })}</div>
+                </div>
+            )}
+            <div className="sidebar-footer">
+              <div className="privacy-mark">◇</div>
+              <strong>{t('privacyMatters')}</strong>
+              <p>{t('privacyMattersBody')}</p>
             </div>
-          </div>
-          {user.role === 'patient' && <nav className="side-nav" aria-label={t('patientNavigation')}>{patientNav.map((item) => <button key={item.key} className={page === item.key ? 'nav-item active' : 'nav-item'} onClick={() => navigate(item.key)} aria-current={page === item.key ? 'page' : undefined} aria-label={item.label}>
-            <Icon name={item.icon} size={20} /><span className="nav-label">{item.label}</span>
-          </button>)}</nav>}
-          {user.role === 'patient' && page === 'assistant' && conversationHistory}
-          {user.role === 'doctor' && <nav className="side-nav" aria-label={t('clinicianNavigation')}>
-            <button className="nav-item active" aria-current="page"><Icon name="clock" size={20} /><span className="nav-label">{t('reviewWorkspace')}</span></button>
-          </nav>}
-          {user.role === 'admin' && <nav className="side-nav" aria-label={t('administratorNavigation')}>
-            <button className="nav-item active" aria-current="page"><Icon name="grid" size={20} /><span className="nav-label">{t('administration')}</span></button>
-          </nav>}
-          <div className="sidebar-footer">
-            <div className="privacy-mark">◇</div>
-            <strong>{t('privacyMatters')}</strong>
-            <p>{t('privacyMattersBody')}</p>
           </div>
         </aside>
         <main className="main-content">
@@ -800,6 +847,16 @@ function App() {
                       <span className="sr-only">{t('conversationLanguageLabel')}</span>
                       <select aria-label={t('conversationLanguageLabel')} value={language} onChange={(event) => setLanguage(event.target.value)}>{LANGUAGES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
                     </label>
+                    <div className="chat-header-search">
+                      <button className="icon-button chat-search-toggle" type="button" onClick={() => setChatSearchExpanded((v) => !v)} title={chatSearchExpanded ? t('hideSearch') : t('searchConversations')}>
+                        {chatSearchExpanded ? <Icon name="close" size={18} /> : <Icon name="search" size={18} />}
+                      </button>
+                      <div className={`chat-header-search-field${chatSearchExpanded ? ' expanded' : ''}`}>
+                        <Icon name="search" size={16} className="search-icon" />
+                        <input type="search" value={chatSearch} onChange={(event) => void searchChats(event.target.value)} placeholder={t('searchTitles')} />
+                      </div>
+                      <button className="icon-button chat-search-clear" type="button" onClick={() => void setChatSearch('')} aria-label={t('clearSearch')}>×</button>
+                    </div>
                     <button className="icon-button" onClick={() => void shareChat(selectedChat)} disabled={!selectedChat} aria-label={t('shareConversation')}><Icon name="share" size={18} /></button>
                   </div>
                 </div>
@@ -814,12 +871,8 @@ function App() {
                   <p>{t('chatEmptyBody')}</p>
                 </div>}</div>
                 <form className="chat-composer" onSubmit={(event) => void sendChatMessage(event)}>
-                  <textarea ref={composerRef} rows={2} value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} maxLength={4000} minLength={5} required aria-label={t('messagePlaceholder')} placeholder={t('messagePlaceholder')} />
-                  <Button type="submit" disabled={sendingRequest || messageDraft.trim().length < 5 || !storeConsent} icon={<Icon name="send" size={18} />}>{sendingRequest ? t('saving') : t('send')}</Button>
-                  <label className="consent-control chat-consent">
-                    <input type="checkbox" checked={storeConsent} onChange={(event) => setStoreConsent(event.target.checked)} required />
-                    <span>{t('consentToStoreMessage')}</span>
-                  </label>
+                  <textarea ref={composerRef} rows={2} value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} onFocus={() => { if (!storeConsent && !consentFocusGuard.current) openConsentModal(composerRef.current) }} maxLength={4000} minLength={5} required aria-label={t('messagePlaceholder')} placeholder={t('messagePlaceholder')} />
+                  <Button type="submit" disabled={sendingRequest || messageDraft.trim().length < 5} icon={<Icon name="send" size={18} />}>{sendingRequest ? t('saving') : t('send')}</Button>
                 </form>
               </div>
             </div>
@@ -852,6 +905,13 @@ function App() {
                   <option value="light">{t('light')}</option>
                   <option value="dark">{t('dark')}</option>
                 </select></label>
+              </aside>
+              <aside className="settings-card privacy-card">
+                <span className="privacy-mark">◇</span>
+                <h2>{t('messageConsent')}</h2>
+                <p>{storeConsent ? t('consentGivenText') : t('consentNotGivenText')}</p>
+                <button className={`button ${storeConsent ? 'button-outline' : 'button-primary'}`} onClick={() => void updateMessageConsent(!storeConsent)}>{storeConsent ? t('withdrawConsent') : t('giveConsent')}</button>
+                <p className="field-hint">{t('consentWithdrawHint')}</p>
               </aside>
             </div>
           </section>}
@@ -946,6 +1006,23 @@ function App() {
           <div className="share-active-links">
             <h3>{t('existingLinks')}</h3>{shareLinks.length === 0 ? <p>{t('noLinksCreated')}</p> : shareLinks.map((item) => <article key={item.id} className="share-link-row">
               <div><strong>{item.active ? t('active') : item.revoked_at ? t('revoked') : t('expired')}</strong><small>{t('expires')} {new Date(item.expires_at).toLocaleString()}</small></div>{item.active && <button className="button button-quiet button-small" type="button" disabled={busy} onClick={() => void revokeShareLink(item.id)}>{t('revokeLink')}</button>}</article>)}</div>
+        </section>
+      </div>}
+
+      {consentModalOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeConsentModal() }}>
+        <section className="modal-card consent-dialog" ref={consentDialogRef} role="dialog" aria-modal="true" aria-labelledby="consent-dialog-title" aria-describedby="consent-dialog-description">
+          <button className="modal-close" type="button" autoFocus aria-label={t('closeConsentDialog')} onClick={closeConsentModal}><Icon name="close" size={18} /></button>
+          <h2 id="consent-dialog-title">{t('consentDialogTitle')}</h2>
+          <p id="consent-dialog-description">{t('consentDialogBody')}</p>
+          <label className="consent-control">
+            <input type="checkbox" checked={consentChecked} onChange={(event) => setConsentChecked(event.target.checked)} required />
+            <span>{t('consentDialogCheckbox')}</span>
+          </label>
+          <p className="field-hint">{t('consentDialogHint')}</p>
+          <div className="dialog-actions">
+            <Button variant="outline" onClick={closeConsentModal}>{t('cancel')}</Button>
+            <Button disabled={!consentChecked} onClick={acceptConsent}>{t('acceptAndContinue')}</Button>
+          </div>
         </section>
       </div>}
 

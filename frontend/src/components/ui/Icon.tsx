@@ -3,7 +3,7 @@ import type { SVGProps } from 'react'
 export type IconName =
   | 'menu' | 'close' | 'edit' | 'share' | 'trash' | 'plus' | 'home' | 'sparkle'
   | 'clock' | 'user' | 'check' | 'chevron-left' | 'chevron-right' | 'send'
-  | 'info' | 'clipboard' | 'grid' | 'alert' | 'lock' | 'plus-circle'
+  | 'info' | 'clipboard' | 'grid' | 'alert' | 'lock' | 'plus-circle' | 'search'
 
 type IconProps = SVGProps<SVGSVGElement> & { name: IconName; size?: number; label?: string }
 
@@ -28,6 +28,7 @@ const paths: Record<IconName, JSX.Element> = {
   grid: <path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" />,
   alert: <><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0Z" /><path d="M12 9v4M12 17h.01" /></>,
   lock: <><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 118 0v4" /></>,
+  search: <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0Z" />,
 }
 
 export function Icon({ name, size = 20, label, className, ...rest }: IconProps) {

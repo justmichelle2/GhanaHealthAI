@@ -59,6 +59,7 @@ class PatientProfileResponse(BaseModel):
 
     full_name: str | None
     preferred_language: str | None
+    messages_consent_given_at: datetime | None = None
 
 
 class PatientProfileUpdate(BaseModel):
@@ -66,6 +67,11 @@ class PatientProfileUpdate(BaseModel):
 
     full_name: str | None = Field(default=None, min_length=2, max_length=160)
     preferred_language: Literal["en", "tw", "ee", "gaa", "ha"]
+
+
+class ConsentUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    consent: bool
 
 class ConversationCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")

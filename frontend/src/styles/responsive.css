@@ -66,6 +66,9 @@
 
   .chat-header { min-height: 54px; padding: var(--space-2) var(--space-3); }
   .chat-language select { min-width: 96px; max-width: 140px; }
+  .chat-search-toggle { display: inline-flex; }
+  .chat-header-search-field { display: none; }
+  .chat-header-search-field.expanded { display: flex; }
   .chat-body { padding: var(--space-4) var(--space-3); }
   .chat-message { max-width: 90%; padding: var(--space-3); }
   .chat-composer { grid-template-columns: minmax(0, 1fr) auto; padding: var(--space-3); gap: var(--space-2); }

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.dependencies import require_role
 from app.models import AuditLog, Conversation, ConversationMessage, ConversationShare, PatientProfile, User, UserRole
-from app.schemas import ConversationCreate, ConversationDetail, ConversationMessageCreate, ConversationRename, ConversationShareCreate, ConversationSummary, PatientProfileResponse, PatientProfileUpdate, ShareTokenRequest, SharedConversation
+from app.schemas import ConversationCreate, ConversationDetail, ConversationMessageCreate, ConversationRename, ConversationShareCreate, ConversationSummary, ConsentUpdate, PatientProfileResponse, PatientProfileUpdate, ShareTokenRequest, SharedConversation
 from app.routers.auth import token_digest, enforce_limit
 
 
@@ -126,6 +126,28 @@ def update_profile(
     db.commit()
     db.refresh(profile)
     return profile
+
+
+@router.patch("/profile/consent", response_model=PatientProfileResponse)
+def update_message_consent(
+    payload: ConsentUpdate,
+    user: User = Depends(require_role(UserRole.PATIENT)),
+    db: Session = Depends(get_db),
+) -> PatientProfile:
+    profile = db.get(PatientProfile, user.id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Patient profile not found")
+    profile.messages_consent_given_at = datetime.now(timezone.utc) if payload.consent else None
+    db.add(AuditLog(
+        actor_user_id=user.id,
+        action="patient_message_consent_updated",
+        resource_type="patient_profile",
+        resource_id=str(user.id),
+    ))
+    db.commit()
+    db.refresh(profile)
+    return profile
+
 
 @router.get("/conversations", response_model=list[ConversationSummary])
 def list_conversations(
