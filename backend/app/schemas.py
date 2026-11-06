@@ -78,6 +78,7 @@ class ConversationCreate(BaseModel):
     message: str = Field(min_length=5, max_length=4000)
     preferred_language: Literal["en", "tw", "ee", "gaa", "ha"]
     consent_to_store: Literal[True]
+    consent_to_ai: Literal[True]
     @field_validator("message")
     @classmethod
     def trim_message(cls, value: str) -> str:
@@ -146,6 +147,7 @@ class ConversationMessageCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     message: str = Field(min_length=5, max_length=4000)
     consent_to_store: Literal[True]
+    consent_to_ai: Literal[True]
     @field_validator("message")
     @classmethod
     def trim_message(cls, value: str) -> str:

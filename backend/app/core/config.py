@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     smtp_password: str | None = None
     smtp_sender: str | None = None
     password_reset_minutes: int = 30
+    dahl_api_key: str | None = None
+    dahl_model: str = "MiniMaxAI/MiniMax-M2.7"
 
     @property
     def allowed_origins(self) -> list[str]:

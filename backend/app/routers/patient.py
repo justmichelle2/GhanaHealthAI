@@ -12,6 +12,7 @@ from app.dependencies import require_role
 from app.models import AuditLog, Conversation, ConversationMessage, ConversationShare, PatientProfile, User, UserRole
 from app.schemas import ConversationCreate, ConversationDetail, ConversationMessageCreate, ConversationRename, ConversationShareCreate, ConversationSummary, ConsentUpdate, PatientProfileResponse, PatientProfileUpdate, ShareTokenRequest, SharedConversation
 from app.routers.auth import token_digest, enforce_limit
+from app.services.dahl import DahlProviderError, generate_reply
 
 
 router = APIRouter(prefix="/patient", tags=["patient profile"])
@@ -162,11 +163,20 @@ def list_conversations(
     return db.scalars(statement).all()
 
 @router.post("/conversations", response_model=ConversationSummary, status_code=201)
-def create_conversation(
+async def create_conversation(
     payload: ConversationCreate,
     user: User = Depends(require_role(UserRole.PATIENT)),
     db: Session = Depends(get_db),
 ) -> Conversation:
+    now = datetime.now(timezone.utc)
+    if not enforce_limit(db, "patient-ai:" + str(user.id), maximum=10, window=timedelta(minutes=1), now=now):
+        db.commit()
+        raise HTTPException(status_code=429, detail="Too many AI requests. Please wait a moment and try again.")
+    db.commit()
+    try:
+        reply = await generate_reply(payload.message, payload.preferred_language)
+    except DahlProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
     conversation = Conversation(
         patient_user_id=user.id,
         # Keep message text out of sidebar titles to reduce accidental shoulder-surfing.
@@ -176,9 +186,11 @@ def create_conversation(
         consented_at=datetime.now(timezone.utc),
     )
     conversation.messages.append(ConversationMessage(body=payload.message, sender_role="patient"))
+    conversation.messages.append(ConversationMessage(body=reply, sender_role="assistant"))
     db.add(conversation)
     db.flush()
     db.add(AuditLog(actor_user_id=user.id, action="patient_message_submitted", resource_type="conversation", resource_id=str(conversation.id)))
+    db.add(AuditLog(actor_user_id=user.id, action="patient_ai_message_consent_given", resource_type="conversation", resource_id=str(conversation.id)))
     db.commit()
     db.refresh(conversation)
     return conversation
@@ -199,24 +211,35 @@ def read_conversation(
     db: Session = Depends(get_db),
 ) -> Conversation:
     conversation = owned_conversation(db, user, conversation_id)
+    now = datetime.now(timezone.utc)
+    if not enforce_limit(db, "patient-ai:" + str(user.id), maximum=10, window=timedelta(minutes=1), now=now):
+        db.commit()
+        raise HTTPException(status_code=429, detail="Too many AI requests. Please wait a moment and try again.")
+    db.commit()
     conversation.messages.sort(key=lambda item: item.created_at)
     return conversation
 
 @router.post("/conversations/{conversation_id}/messages", response_model=ConversationDetail)
-def add_conversation_message(
+async def add_conversation_message(
     conversation_id: UUID,
     payload: ConversationMessageCreate,
     user: User = Depends(require_role(UserRole.PATIENT)),
     db: Session = Depends(get_db),
 ) -> Conversation:
     conversation = owned_conversation(db, user, conversation_id)
+    try:
+        reply = await generate_reply(payload.message, conversation.preferred_language)
+    except DahlProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
     conversation.messages.append(ConversationMessage(body=payload.message, sender_role="patient"))
+    conversation.messages.append(ConversationMessage(body=reply, sender_role="assistant"))
     conversation.updated_at = datetime.now(timezone.utc)
     conversation.status = "pending_review"
     conversation.reviewed_at = None
     conversation.reviewed_by_user_id = None
     conversation.review_note = None
     db.add(AuditLog(actor_user_id=user.id, action="patient_message_submitted", resource_type="conversation", resource_id=str(conversation.id)))
+    db.add(AuditLog(actor_user_id=user.id, action="patient_ai_message_consent_given", resource_type="conversation", resource_id=str(conversation.id)))
     db.commit()
     db.refresh(conversation)
     conversation.messages.sort(key=lambda item: item.created_at)

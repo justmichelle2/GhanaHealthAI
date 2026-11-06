@@ -2,7 +2,7 @@
 
 **Effective date:** not set · **Operator/contact:** not designated · **Approval:** not approved
 
-Ghana Health Assistant is an early health-information and clinician-review application. It is not clinically validated, does not currently generate automated answers, and is not a substitute for assessment, diagnosis, treatment, or emergency services. Users should seek qualified care and contact local emergency services for urgent situations.
+Ghana Health Assistant is an early health-information and clinician-review application. AI replies provide general information, may be inaccurate, are not clinically validated, and are not a substitute for assessment, diagnosis, treatment, or emergency services. Each message requires separate consent before it is sent to Dahl Inference, an external AI provider. Users should seek qualified care and contact local emergency services for urgent situations.
 
 Patient accounts may submit messages for storage and clinician review. Users should avoid including information that is not needed. Sharing is off by default; creating a link requires a separate confirmation. Anyone with a created link can read the shared conversation until it expires or is revoked. Users should revoke links when no longer needed and should not share links through public channels.
 

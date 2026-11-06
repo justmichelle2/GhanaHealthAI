@@ -135,6 +135,7 @@ describe('message consent', () => {
     await user.click(screen.getByRole('button', { name: /accept and continue/i }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     await user.type(textbox, 'I have a question about sleep.')
+    await user.click(screen.getByRole('checkbox', { name: /i agree to send this message to dahl inference/i }))
     await user.click(screen.getByRole('button', { name: /send/i }))
     await screen.findByRole('heading', { name: /ask a health question/i })
   })
