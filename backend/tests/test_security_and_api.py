@@ -301,17 +301,16 @@ def test_patient_message_consent_is_saved_with_audit_history(isolated_applicatio
 
     initial = client.get("/patient/profile")
     assert initial.status_code == 200
-    assert initial.json()["message_storage_consent"] is False
-    granted = client.patch("/patient/consent", json={"message_storage_consent": True})
+    assert initial.json()["messages_consent_given_at"] is None
+    granted = client.patch("/patient/profile/consent", json={"consent": True})
     assert granted.status_code == 200
-    assert granted.json()["message_storage_consent"] is True
-    withdrawn = client.patch("/patient/consent", json={"message_storage_consent": False})
+    assert granted.json()["messages_consent_given_at"] is not None
+    withdrawn = client.patch("/patient/profile/consent", json={"consent": False})
     assert withdrawn.status_code == 200
-    assert withdrawn.json()["message_storage_consent"] is False
+    assert withdrawn.json()["messages_consent_given_at"] is None
     with isolated_application_db["sessions"]() as session:
         actions = [item.action for item in session.query(AuditLog).all()]
-    assert "patient_message_storage_consent_given" in actions
-    assert "patient_message_storage_consent_withdrawn" in actions
+    assert "patient_message_consent_updated" in actions
 
 
 def test_clinician_review_sends_patient_visible_reply_and_keeps_note_internal(isolated_application_db):

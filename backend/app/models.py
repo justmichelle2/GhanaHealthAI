@@ -31,7 +31,7 @@ class PatientProfile(Base):
     user_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     full_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
     preferred_language: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    message_storage_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    messages_consent_given_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
     user: Mapped[User] = relationship(back_populates="patient_profile")
 

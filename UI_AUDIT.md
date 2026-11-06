@@ -1,7 +1,7 @@
 # Ghana Health Assistant UI/UX Audit
 
 **Audit date:** 2026-11-04  
-**Scope:** Existing React/TypeScript application in `frontend/src/App.tsx`, `index.css`, `share.css`, `responsive-dark.css`, and the current locale resources. The audit describes the checked-in implementation; it does not treat planned AI, speech, or clinical functionality as present.
+**Scope:** Existing React/TypeScript application in `frontend/src/App.tsx` and `frontend/src/styles/`, plus the current locale resources. The original 2026-11-04 audit covered `index.css`, `share.css` and `responsive-dark.css`; those files have since been consolidated and removed. The audit describes the checked-in implementation; it does not treat planned AI, speech, or clinical functionality as present.
 
 ## Summary
 
@@ -49,5 +49,14 @@ The application already has real patient authentication, account recovery, profi
 - The landing page now includes About, workflow, language, privacy, FAQ and patient-account sections. The internal-looking `GH · 01` decoration is removed, and non-English interface selections show that untranslated content falls back to English.
 - Primary registration/login copy uses the English translation catalog. Registration has an account-data acknowledgement disclosure, a separate health-conversation language setting, and a reminder that message consent is requested separately at submission time. This acknowledgement is not sent to or persisted by the backend.
 - API failures shown in the UI use safe retry/validation text rather than raw server details. Conversation rename/delete now use an in-app keyboard-operable dialog instead of native browser prompts.
-- The expanded English catalog and sparse locale fallback compile and pass the locale tests. Twi/Ewe/Ga/Hausa translations remain empty pending speaker review; dashboard, clinician and administrator pages still contain untranslated literals. The audit is therefore still open for full multilingual completion, the share dialog's focus lifecycle, and visual review of authenticated role screens at phone/tablet sizes.
+- The expanded English catalog and sparse locale fallback compile and pass the locale tests. Twi/Ewe/Ga/Hausa translations remain empty pending speaker review; dashboard, clinician and administrator pages still contain untranslated literals. The audit is therefore still open for full multilingual completion and visual review of authenticated role screens at phone/tablet sizes.
+
+## Frontend refactor follow-up (2026-11-05)
+
+- **Design system:** `index.css`, `responsive-dark.css` and `share.css` were removed and replaced by one layered system: `frontend/src/styles/tokens.css` (semantic light/dark tokens, reset, focus rings, skip link), `components.css` (a single component layer) and `responsive.css` (1100/900/768/640/420 breakpoints). The previous two competing dark-theme implementations and the legacy dead CSS are gone. Production CSS dropped from 91.3 kB to 38.7 kB.
+- **Chat workspace:** the duplicated `.chat-page-heading` block was removed; the title, review status, conversation-language selector and share action now live in one compact header. The empty state is a small icon with one heading and one sentence. The large “automated answer unavailable” card and the `voice-note` paragraph were replaced by a single `chat-notice` line, and the unavailable microphone control was removed. The composer now gives the conversation the full remaining height.
+- **Icons and primitives:** text glyphs were replaced with an accessible SVG `Icon` component; `Button` and `Alert` primitives are reused in the composer, dialogs and feedback banners. Icons are decorative by default (`aria-hidden`) and expose a label only when given one.
+- **Landing:** the decorative orbit visual was replaced by a compact `.landing-summary` card that states the real language and clinician-review workflow without implying automated answers.
+- **Automated tests:** Vitest, jsdom, Testing Library and `jest-axe` were added. The UI suite renders the patient chat workspace and asserts the compact layout, accessible controls, the absence of the removed voice/unavailable-answer copy, and zero detectable axe violations. The existing i18n suite still runs. `npm test` runs both.
+- **Still open:** no Playwright/browser harness is installed, so the 360–1440 px screenshot matrix and rendered contrast still need a real-browser review. Non-English catalogs remain intentionally empty pending competent-speaker and clinical/legal review.
 

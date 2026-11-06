@@ -1,4 +1,4 @@
-"""Persist a patient's message storage consent preference."""
+"""Persist patient message-storage consent on the profile."""
 from alembic import op
 import sqlalchemy as sa
 
@@ -11,9 +11,9 @@ depends_on = None
 def upgrade() -> None:
     op.add_column(
         "patient_profiles",
-        sa.Column("message_storage_consent", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("messages_consent_given_at", sa.DateTime(timezone=True), nullable=True),
     )
 
 
 def downgrade() -> None:
-    op.drop_column("patient_profiles", "message_storage_consent")
+    op.drop_column("patient_profiles", "messages_consent_given_at")

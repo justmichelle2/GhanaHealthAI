@@ -59,7 +59,7 @@ class PatientProfileResponse(BaseModel):
 
     full_name: str | None
     preferred_language: str | None
-    message_storage_consent: bool
+    messages_consent_given_at: datetime | None = None
 
 
 class PatientProfileUpdate(BaseModel):
@@ -69,9 +69,9 @@ class PatientProfileUpdate(BaseModel):
     preferred_language: Literal["en", "tw", "ee", "gaa", "ha"]
 
 
-class PatientConsentUpdate(BaseModel):
+class ConsentUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    message_storage_consent: bool
+    consent: bool
 
 class ConversationCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
