@@ -402,7 +402,7 @@ function App() {
       return
     }
     const message = messageDraft.trim()
-    if (message.length < 5) { setError(t('invalidForm')); return }
+    if (!message) { setError(t('invalidForm')); return }
     setSendingRequest(true)
     try {
       const saved = selectedChat
@@ -917,8 +917,8 @@ function App() {
                 </div>}</div>
                 <form className="chat-composer" onSubmit={(event) => void sendChatMessage(event)}>
                   <label className="consent-control ai-consent-control"><input ref={aiConsentRef} type="checkbox" checked={aiConsentChecked} onChange={(event) => setAiConsentChecked(event.target.checked)} /><span>{t('consentToSendToAI')}</span></label>
-                  <textarea ref={composerRef} rows={2} value={messageDraft} onChange={(event) => { setMessageDraft(event.target.value); setAiConsentChecked(false) }} onFocus={() => { if (!storeConsent && !consentFocusGuard.current) openConsentModal(composerRef.current) }} maxLength={4000} minLength={5} required aria-label={t('messagePlaceholder')} placeholder={t('messagePlaceholder')} />
-                  <Button type="submit" disabled={sendingRequest || messageDraft.trim().length < 5} icon={<Icon name="send" size={18} />}><span className="send-text">{sendingRequest ? t('saving') : t('send')}</span></Button>
+                  <textarea ref={composerRef} rows={2} value={messageDraft} onChange={(event) => { setMessageDraft(event.target.value); setAiConsentChecked(false) }} onFocus={() => { if (!storeConsent && !consentFocusGuard.current) openConsentModal(composerRef.current) }} maxLength={4000} minLength={1} required aria-label={t('messagePlaceholder')} placeholder={t('messagePlaceholder')} />
+                  <Button type="submit" disabled={sendingRequest || messageDraft.trim().length === 0} icon={<Icon name="send" size={18} />}><span className="send-text">{sendingRequest ? t('saving') : t('send')}</span></Button>
                 </form>
               </div>
             </div>

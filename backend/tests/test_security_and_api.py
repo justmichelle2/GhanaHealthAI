@@ -37,6 +37,8 @@ def test_conversation_requires_explicit_consent_and_nonblank_text():
         ConversationCreate(message="     ", preferred_language="en", consent_to_store=True, consent_to_ai=True)
     payload = ConversationCreate(message="  Sample health question  ", preferred_language="gaa", consent_to_store=True, consent_to_ai=True)
     assert payload.message == "Sample health question"
+    greeting = ConversationCreate(message="hi", preferred_language="en", consent_to_store=True, consent_to_ai=True)
+    assert greeting.message == "hi"
 
 
 def test_password_hash_is_not_plaintext_and_verifies():
@@ -112,7 +114,7 @@ def test_patient_conversations_persist_and_enforce_owner_on_every_operation(monk
     app.dependency_overrides[get_current_user] = lambda: owner
     try:
         response = client.post("/patient/conversations", json={
-            "message": "I have a question about sleep.",
+            "message": "hi",
             "preferred_language": "en",
             "consent_to_store": True,
             "consent_to_ai": True,
@@ -123,7 +125,7 @@ def test_patient_conversations_persist_and_enforce_owner_on_every_operation(monk
 
         detail = client.get(f"/patient/conversations/{conversation_id}")
         assert detail.status_code == 200
-        assert detail.json()["messages"][0]["body"] == "I have a question about sleep."
+        assert detail.json()["messages"][0]["body"] == "hi"
         assert detail.json()["messages"][1]["sender_role"] == "assistant"
         assert detail.json()["messages"][1]["body"] == "General information reply."
 

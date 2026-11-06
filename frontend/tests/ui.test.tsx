@@ -148,7 +148,7 @@ describe('message consent', () => {
     await screen.findByRole('dialog', { name: /before you start/i })
     await user.click(screen.getByRole('checkbox', { name: /i consent to storing my messages for clinician review/i }))
     await user.click(screen.getByRole('button', { name: /accept and continue/i }))
-    await user.type(textbox, 'Hello, I have a question.')
+    await user.type(textbox, 'hi')
 
     const sendButton = screen.getByRole('button', { name: /send/i })
     expect(sendButton).toBeEnabled()
