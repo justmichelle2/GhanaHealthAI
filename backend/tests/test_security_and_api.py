@@ -102,6 +102,7 @@ def test_patient_conversations_persist_and_enforce_owner_on_every_operation(monk
     test_sessions = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     with test_sessions() as session:
         owner = User(email="owner@example.com", password_hash="not-used", role="patient", is_active=True)
+        owner.patient_profile = PatientProfile(full_name="Test Patient", preferred_language="en")
         other = User(email="other@example.com", password_hash="not-used", role="patient", is_active=True)
         session.add_all([owner, other])
         session.commit()
@@ -113,12 +114,15 @@ def test_patient_conversations_persist_and_enforce_owner_on_every_operation(monk
     app.dependency_overrides[get_db] = test_db
     app.dependency_overrides[get_current_user] = lambda: owner
     try:
-        response = client.post("/patient/conversations", json={
+        payload = {
             "message": "hi",
             "preferred_language": "en",
             "consent_to_store": True,
             "consent_to_ai": True,
-        })
+        }
+        assert client.post("/patient/conversations", json=payload).status_code == 403
+        assert client.patch("/patient/profile/ai-consent", json={"consent": True}).status_code == 200
+        response = client.post("/patient/conversations", json=payload)
         assert response.status_code == 201
         conversation_id = response.json()["id"]
         assert response.json()["title"].startswith("Conversation ")
@@ -134,6 +138,14 @@ def test_patient_conversations_persist_and_enforce_owner_on_every_operation(monk
         })
         assert appended.status_code == 200
         assert len(appended.json()["messages"]) == 4
+
+        assert client.patch("/patient/profile/ai-consent", json={"consent": False}).status_code == 200
+        followup = {"message": "Another follow-up.", "consent_to_store": True, "consent_to_ai": True}
+        assert client.post(f"/patient/conversations/{conversation_id}/messages", json=followup).status_code == 403
+        assert client.patch("/patient/profile/ai-consent", json={"consent": True}).status_code == 200
+        appended_again = client.post(f"/patient/conversations/{conversation_id}/messages", json=followup)
+        assert appended_again.status_code == 200
+        assert len(appended_again.json()["messages"]) == 6
 
         renamed = client.patch(f"/patient/conversations/{conversation_id}", json={"title": "Sleep questions"})
         assert renamed.status_code == 200
@@ -311,15 +323,24 @@ def test_patient_message_consent_is_saved_with_audit_history(isolated_applicatio
     initial = client.get("/patient/profile")
     assert initial.status_code == 200
     assert initial.json()["messages_consent_given_at"] is None
+    assert initial.json()["ai_provider_consent_given_at"] is None
     granted = client.patch("/patient/profile/consent", json={"consent": True})
     assert granted.status_code == 200
     assert granted.json()["messages_consent_given_at"] is not None
     withdrawn = client.patch("/patient/profile/consent", json={"consent": False})
     assert withdrawn.status_code == 200
     assert withdrawn.json()["messages_consent_given_at"] is None
+    ai_granted = client.patch("/patient/profile/ai-consent", json={"consent": True})
+    assert ai_granted.status_code == 200
+    assert ai_granted.json()["ai_provider_consent_given_at"] is not None
+    ai_withdrawn = client.patch("/patient/profile/ai-consent", json={"consent": False})
+    assert ai_withdrawn.status_code == 200
+    assert ai_withdrawn.json()["ai_provider_consent_given_at"] is None
     with isolated_application_db["sessions"]() as session:
         actions = [item.action for item in session.query(AuditLog).all()]
     assert "patient_message_consent_updated" in actions
+    assert "patient_ai_provider_consent_given" in actions
+    assert "patient_ai_provider_consent_withdrawn" in actions
 
 
 def test_clinician_review_sends_patient_visible_reply_and_keeps_note_internal(isolated_application_db):

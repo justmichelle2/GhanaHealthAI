@@ -150,6 +150,27 @@ def update_message_consent(
     return profile
 
 
+@router.patch("/profile/ai-consent", response_model=PatientProfileResponse)
+def update_ai_provider_consent(
+    payload: ConsentUpdate,
+    user: User = Depends(require_role(UserRole.PATIENT)),
+    db: Session = Depends(get_db),
+) -> PatientProfile:
+    profile = db.get(PatientProfile, user.id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Patient profile not found")
+    profile.ai_provider_consent_given_at = datetime.now(timezone.utc) if payload.consent else None
+    db.add(AuditLog(
+        actor_user_id=user.id,
+        action="patient_ai_provider_consent_given" if payload.consent else "patient_ai_provider_consent_withdrawn",
+        resource_type="patient_profile",
+        resource_id=str(user.id),
+    ))
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
 @router.get("/conversations", response_model=list[ConversationSummary])
 def list_conversations(
     search: str | None = Query(default=None, max_length=100),
@@ -168,6 +189,9 @@ async def create_conversation(
     user: User = Depends(require_role(UserRole.PATIENT)),
     db: Session = Depends(get_db),
 ) -> Conversation:
+    profile = db.get(PatientProfile, user.id)
+    if profile is None or profile.ai_provider_consent_given_at is None:
+        raise HTTPException(status_code=403, detail="Consent to send messages to the AI provider is required")
     now = datetime.now(timezone.utc)
     if not enforce_limit(db, "patient-ai:" + str(user.id), maximum=10, window=timedelta(minutes=1), now=now):
         db.commit()
@@ -227,6 +251,9 @@ async def add_conversation_message(
     db: Session = Depends(get_db),
 ) -> Conversation:
     conversation = owned_conversation(db, user, conversation_id)
+    profile = db.get(PatientProfile, user.id)
+    if profile is None or profile.ai_provider_consent_given_at is None:
+        raise HTTPException(status_code=403, detail="Consent to send messages to the AI provider is required")
     try:
         reply = await generate_reply(payload.message, conversation.preferred_language)
     except DahlProviderError as exc:

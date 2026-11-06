@@ -5,7 +5,7 @@ import { Alert } from './components/ui/Alert'
 import { Button } from './components/ui/Button'
 
 type User = { id: string; email: string; role: 'patient' | 'doctor' | 'admin'; is_active: boolean; created_at: string }
-type Profile = { full_name: string | null; preferred_language: string | null; messages_consent_given_at: string | null }
+type Profile = { full_name: string | null; preferred_language: string | null; messages_consent_given_at: string | null; ai_provider_consent_given_at: string | null }
 type Conversation = { id: string; title: string; preferred_language: string; status: string; created_at: string; updated_at: string }
 type ChatMessage = { id: string; sender_role: string; body: string; created_at: string }
 type ConversationDetail = Conversation & { messages: ChatMessage[] }
@@ -85,7 +85,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 function App() {
   const [page, setPage] = useState<Page>('loading')
   const [user, setUser] = useState<User | null>(null)
-  const [profile, setProfile] = useState<Profile>({ full_name: null, preferred_language: 'en', messages_consent_given_at: null })
+  const [profile, setProfile] = useState<Profile>({ full_name: null, preferred_language: 'en', messages_consent_given_at: null, ai_provider_consent_given_at: null })
   const [submissions, setSubmissions] = useState<Conversation[]>([])
   const [chatResults, setChatResults] = useState<Conversation[]>([])
   const [pending, setPending] = useState<Review[]>([])
@@ -287,7 +287,7 @@ function App() {
     const [saved, history] = await Promise.all([
       request<Profile>('/patient/profile'), request<Conversation[]>('/patient/conversations'),
     ])
-    setProfile(saved); setFullName(saved.full_name || ''); setLanguage(saved.preferred_language || 'en'); setStoreConsent(!!saved.messages_consent_given_at); setSubmissions(history); setChatResults(history); setPage('dashboard')
+    setProfile(saved); setFullName(saved.full_name || ''); setLanguage(saved.preferred_language || 'en'); setStoreConsent(!!saved.messages_consent_given_at); setAiConsentChecked(!!saved.ai_provider_consent_given_at); setSubmissions(history); setChatResults(history); setPage('dashboard')
   }
 
   useEffect(() => {
@@ -405,7 +405,7 @@ function App() {
   async function sendChatMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(''); setSuccess('')
     if (!storeConsent) { openConsentModal(composerRef.current); return }
-    if (!aiConsentChecked) {
+    if (!profile.ai_provider_consent_given_at && !aiConsentChecked) {
       setError(t('aiConsentRequired'))
       aiConsentRef.current?.focus()
       return
@@ -421,7 +421,11 @@ function App() {
       setSubmissions((items) => [saved, ...items.filter((item) => item.id !== saved.id)])
       setChatResults((items) => [saved, ...items.filter((item) => item.id !== saved.id)])
       setMessageDraft('')
-      setAiConsentChecked(false)
+      if (!profile.ai_provider_consent_given_at) {
+        const consentedAt = new Date().toISOString()
+        setProfile((current) => ({ ...current, ai_provider_consent_given_at: consentedAt }))
+        setAiConsentChecked(true)
+      }
       setSuccess(t('aiReplyReady'))
     } catch (reason) { setError(describeError(reason, 'unableSaveMessage')) }
     finally { setSendingRequest(false) }
@@ -456,6 +460,21 @@ function App() {
       return true
     } catch (reason) { setError(describeError(reason, 'unableSaveConsent')); return false }
     finally { setBusy(false) }
+  }
+
+  async function updateAiProviderConsent(consent: boolean): Promise<boolean> {
+    setError(''); setSuccess(''); setBusy(true)
+    try {
+      const saved = await request<Profile>('/patient/profile/ai-consent', { method: 'PATCH', body: JSON.stringify({ consent }) })
+      setProfile(saved)
+      setAiConsentChecked(!!saved.ai_provider_consent_given_at)
+      setSuccess(consent ? t('dahlConsentSaved') : t('dahlConsentWithdrawn'))
+      return true
+    } catch (reason) {
+      setAiConsentChecked(!!profile.ai_provider_consent_given_at)
+      setError(describeError(reason, 'unableSaveConsent'))
+      return false
+    } finally { setBusy(false) }
   }
 
   async function searchChats(value: string) {
@@ -925,9 +944,10 @@ function App() {
                   <p>{t('chatEmptyBody')}</p>
                 </div>}</div>
                 <form className="chat-composer" onSubmit={(event) => void sendChatMessage(event)}>
-                  <label className="consent-control ai-consent-control"><input ref={aiConsentRef} type="checkbox" checked={aiConsentChecked} onChange={(event) => setAiConsentChecked(event.target.checked)} /><span>{t('consentToSendToAI')}</span></label>
-                  <textarea ref={composerRef} rows={2} value={messageDraft} onChange={(event) => { setMessageDraft(event.target.value); setAiConsentChecked(false) }} onFocus={() => { if (!storeConsent && !consentFocusGuard.current) openConsentModal(composerRef.current) }} maxLength={4000} minLength={1} required aria-label={t('messagePlaceholder')} placeholder={t('messagePlaceholder')} />
-                  <Button type="submit" disabled={sendingRequest || messageDraft.trim().length === 0} icon={<Icon name="send" size={18} />}><span className="send-text">{sendingRequest ? t('saving') : t('send')}</span></Button>
+                  {!profile.ai_provider_consent_given_at && <label className="consent-control ai-consent-control"><input ref={aiConsentRef} type="checkbox" checked={aiConsentChecked} disabled={busy || sendingRequest} onChange={(event) => { const checked = event.target.checked; setAiConsentChecked(checked); if (checked) void updateAiProviderConsent(true) }} /><span>{t('consentToSendToAI')}</span></label>}
+                  {profile.ai_provider_consent_given_at && <p className="ai-consent-saved">{t('dahlConsentSaved')}</p>}
+                  <textarea ref={composerRef} rows={2} value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} onFocus={() => { if (!storeConsent && !consentFocusGuard.current) openConsentModal(composerRef.current) }} maxLength={4000} minLength={1} required aria-label={t('messagePlaceholder')} placeholder={t('messagePlaceholder')} />
+                  <Button type="submit" disabled={busy || sendingRequest || messageDraft.trim().length === 0} icon={<Icon name="send" size={18} />}><span className="send-text">{sendingRequest ? t('saving') : t('send')}</span></Button>
                 </form>
               </div>
             </div>
@@ -958,6 +978,10 @@ function App() {
                 <div className="message-consent-row">
                   <div><strong>Store my messages for clinician review</strong><p>Choose whether your messages may be stored for review by an authorized clinician.</p></div>
                   <button className="consent-switch" type="button" role="switch" aria-label="Store my messages for clinician review" aria-checked={!!profile.messages_consent_given_at} disabled={busy} onClick={() => { const next = !profile.messages_consent_given_at; if (next || window.confirm('You will be asked to consent again before your next message.')) void updateMessageConsent(next) }}><span /></button>
+                </div>
+                <div className="message-consent-row">
+                  <div><strong>{t('dahlConsentLabel')}</strong><p>{t('dahlConsentDescription')}</p></div>
+                  <button className="consent-switch" type="button" role="switch" aria-label={t('dahlConsentLabel')} aria-checked={!!profile.ai_provider_consent_given_at} disabled={busy} onClick={() => { const next = !profile.ai_provider_consent_given_at; if (next || window.confirm(t('dahlConsentWithdrawConfirm'))) void updateAiProviderConsent(next) }}><span /></button>
                 </div>
                 <label className="theme-setting" htmlFor="theme-setting">{t('colorTheme')}<select id="theme-setting" value={themeMode} onChange={(event) => setThemeMode(event.target.value as ThemeMode)}>
                   <option value="system">{t('system')}</option>

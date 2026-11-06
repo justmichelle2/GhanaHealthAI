@@ -60,6 +60,7 @@ class PatientProfileResponse(BaseModel):
     full_name: str | None
     preferred_language: str | None
     messages_consent_given_at: datetime | None = None
+    ai_provider_consent_given_at: datetime | None = None
 
 
 class PatientProfileUpdate(BaseModel):

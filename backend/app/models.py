@@ -32,6 +32,7 @@ class PatientProfile(Base):
     full_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
     preferred_language: Mapped[str | None] = mapped_column(String(32), nullable=True)
     messages_consent_given_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ai_provider_consent_given_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
     user: Mapped[User] = relationship(back_populates="patient_profile")
 
