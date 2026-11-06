@@ -20,6 +20,15 @@ type ShareLink = { id: string; created_at: string; expires_at: string; revoked_a
 type PublicConversation = { preferred_language: string; created_at: string; messages: { sender_role: string; body: string; created_at: string }[] }
 type ApiErrorCode = 'network' | 'invalid' | 'duplicate' | 'unavailable' | 'quota' | 'providerAuth' | 'credentials' | 'generic'
 
+function displayMessageBody(message: Pick<ChatMessage, 'sender_role' | 'body'>): string {
+  if (message.sender_role !== 'assistant') return message.body
+  const visible = message.body
+    .replace(/<think\b[^>]*>[\s\S]*?(?:<\/think\s*>|$)/gi, '')
+    .replace(/<\/?think\b[^>]*>/gi, '')
+    .trim()
+  return visible || 'This reply could not be displayed.'
+}
+
 const API = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
 const LANGUAGES = [{ value: 'en', label: 'English' }, { value: 'tw', label: 'Twi' }, { value: 'ee', label: 'Ewe' }, { value: 'gaa', label: 'Ga' }, { value: 'ha', label: 'Hausa' }]
 const errorKeys: Record<ApiErrorCode, TranslationKey> = {
@@ -778,7 +787,7 @@ function App() {
             <p>{t('conversationLanguageLabel')}: {languageName(publicConversation.preferred_language)} · {new Date(publicConversation.created_at).toLocaleDateString()}</p>
             <div className="chat-messages">{publicConversation.messages.map((message, index) => <article key={`${message.created_at}-${index}`} className={message.sender_role === 'patient' ? 'chat-message patient-message' : message.sender_role === 'doctor' ? 'chat-message clinician-message' : 'chat-message assistant-message'}>
               <span>{message.sender_role === 'patient' ? t('patient') : message.sender_role === 'doctor' ? t('clinician') : t('healthAssistantRole')} · {new Date(message.created_at).toLocaleString()}</span>
-              <p>{message.body}</p>
+              <p>{displayMessageBody(message)}</p>
             </article>)}</div>
           </>}</section>
       </main>}
@@ -907,7 +916,7 @@ function App() {
                 </div>}
                 <div className="chat-body" ref={chatBodyRef} aria-live="polite">{selectedChat?.messages.length ? <div className="chat-messages">{selectedChat.messages.map((message) => <article className={message.sender_role === 'patient' ? 'chat-message patient-message' : message.sender_role === 'doctor' ? 'chat-message clinician-message' : 'chat-message assistant-message'} key={message.id}>
                   <span>{message.sender_role === 'patient' ? t('you') : message.sender_role === 'doctor' ? t('clinician') : t('healthAssistantRole')} · {new Date(message.created_at).toLocaleString()}</span>
-                  <p>{message.body}</p>
+                  <p>{displayMessageBody(message)}</p>
                 </article>)}
                   <p className="chat-notice">{t('chatNotice')}</p>
                 </div> : <div className="chat-empty-state">

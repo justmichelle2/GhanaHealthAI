@@ -1,3 +1,5 @@
+import re
+
 import httpx
 
 from app.core.config import get_settings
@@ -5,6 +7,14 @@ from app.core.config import get_settings
 
 class DahlProviderError(Exception):
     """A provider failure that can be reported without exposing provider details."""
+
+
+def _clean_reply(content: str) -> str:
+    # Some reasoning models include a private <think> section in their output.
+    # Never persist or display that section to the patient.
+    cleaned = re.sub(r"<think\b[^>]*>.*?(?:</think\s*>|$)", "", content, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(r"</?think\b[^>]*>", "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
 
 
 async def generate_reply(message: str, language: str) -> str:
@@ -44,7 +54,10 @@ async def generate_reply(message: str, language: str) -> str:
         content = response.json()["choices"][0]["message"]["content"]
         if not isinstance(content, str) or not content.strip():
             raise DahlProviderError("AI returned an empty reply")
-        return content.strip()[:4000]
+        cleaned = _clean_reply(content)
+        if not cleaned:
+            raise DahlProviderError("AI returned an empty reply")
+        return cleaned[:4000]
     except DahlProviderError:
         raise
     except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
