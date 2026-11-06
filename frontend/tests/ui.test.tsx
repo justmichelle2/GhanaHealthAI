@@ -67,7 +67,7 @@ describe('chat workspace', () => {
 
     expect(await screen.findByRole('heading', { name: /ask a health question/i })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: /write a message/i })).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: /health-conversation language/i })).toBeInTheDocument()
+    expect(screen.getAllByRole('combobox', { name: /health-conversation language/i })).toHaveLength(2)
 
     expect(screen.queryByText(/voice input is unavailable/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/automated health answers are unavailable/i)).not.toBeInTheDocument()

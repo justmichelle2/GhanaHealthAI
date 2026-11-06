@@ -12,6 +12,8 @@
   --surface: #ffffff;
   --surface-raised: #f9fbf8;
   --border: #dce6e1;
+  --input-surface: #ffffff;
+  --input-border: #dce6e1;
   --text-primary: #183a38;
   --text-secondary: #526866;
   --text-muted: #667875;
@@ -35,6 +37,10 @@
   --danger-contrast: #ffffff;
   --success: #16794a;
   --focus-ring: #087f70;
+  --overlay: rgb(0 0 0 / 55%);
+  --overlay-subtle: rgb(0 0 0 / 45%);
+  --shadow-overlay: rgb(0 0 0 / 30%);
+  --dialog-shadow: rgb(0 0 0 / 33%);
 
   /* Shape and elevation */
   --surface-shadow: 0 12px 30px rgb(24 58 56 / 6%);
@@ -81,6 +87,8 @@ html[data-theme='dark'] {
   --surface: #000000;
   --surface-raised: #0a0a0a;
   --border: #2A2A2A;
+  --input-surface: #121212;
+  --input-border: #333333;
   --text-primary: #F5F5F5;
   --text-secondary: #B3B3B3;
   --text-muted: #8A8A8A;
@@ -98,12 +106,16 @@ html[data-theme='dark'] {
   /* Status */
   --warning-surface: #1A1405;
   --warning-text: #F5D58A;
-  --danger: #b42318;
+  --danger: #ff6b62;
   --danger-solid: #b42318;
   --danger-solid-hover: #8f1d15;
   --danger-contrast: #ffffff;
-  --success: #16794a;
-  --focus-ring: #087f70;
+  --success: #2FA36B;
+  --focus-ring: #2FA36B;
+  --overlay: rgb(0 0 0 / 55%);
+  --overlay-subtle: rgb(0 0 0 / 45%);
+  --shadow-overlay: rgb(0 0 0 / 30%);
+  --dialog-shadow: rgb(0 0 0 / 33%);
 
   /* Shape and elevation */
   --surface-shadow: 0 16px 38px rgb(0 0 0 / 35%);
@@ -141,7 +153,7 @@ html[data-theme='dark'] {
 
 * { box-sizing: border-box; }
 
-html, body { min-width: 320px; min-height: 100%; }
+html, body { min-width: 320px; min-height: 100%; overflow-x: clip; }
 
 body {
   margin: 0;

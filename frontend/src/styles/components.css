@@ -79,11 +79,11 @@ input, textarea, select {
   width: 100%;
   min-height: var(--control-height);
   padding: 10px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--input-border);
   border-radius: var(--radius-small);
   outline: none;
   color: var(--text-primary);
-  background: var(--surface);
+  background: var(--input-surface);
   font-size: var(--font-label);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
@@ -112,7 +112,11 @@ input:disabled, select:disabled, textarea:disabled { color: var(--text-muted); b
 }
 
 .consent-control { display: flex; align-items: flex-start; gap: var(--space-2); color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
-.consent-control input { width: 18px; height: 18px; min-height: 18px; flex: 0 0 18px; margin: 2px 0 0; padding: 0; accent-color: var(--accent); }
+.consent-control input[type="checkbox"] { appearance: none; width: 18px; height: 18px; min-height: 18px; flex: 0 0 18px; margin: 2px 0 0; padding: 0; display: grid; place-content: center; border: 1px solid var(--input-border); border-radius: 4px; color: var(--accent-contrast); background: var(--input-surface); }
+.consent-control input[type="checkbox"]::after { width: 9px; height: 5px; content: ""; border: solid currentColor; border-width: 0 0 2px 2px; transform: rotate(-45deg) scale(0); transition: transform 120ms ease; }
+.consent-control input[type="checkbox"]:checked { border-color: var(--accent); background: var(--accent); }
+.consent-control input[type="checkbox"]:checked::after { transform: rotate(-45deg) scale(1); }
+.consent-control input[type="checkbox"]:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 .consent-control span { min-width: 0; }
 
 /* ------------------------------------------------------------------- Header */
@@ -129,6 +133,7 @@ input:disabled, select:disabled, textarea:disabled { color: var(--text-muted); b
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
+.topbar button, .topbar label, .topbar select { white-space: nowrap; }
 .brand { display: inline-flex; align-items: center; gap: var(--space-3); color: var(--text-primary); text-decoration: none; }
 .brand-mark {
   width: 38px;
@@ -301,10 +306,10 @@ input:disabled, select:disabled, textarea:disabled { color: var(--text-muted); b
 .sidebar-footer strong { display: block; margin-top: var(--space-2); color: var(--text-primary); font-size: 13px; }
 .sidebar-footer p { margin: var(--space-1) 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 .privacy-mark { color: var(--accent-text); }
-.sidebar-collapse { width: 100%; min-height: 42px; margin-top: var(--space-3); padding: 0 var(--space-3); display: flex; align-items: center; gap: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-small); color: var(--text-secondary); background: var(--surface); text-align: left; }
+.sidebar-collapse { width: 100%; min-height: 44px; margin-top: var(--space-3); padding: 0 var(--space-3); display: flex; align-items: center; gap: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-small); color: var(--text-secondary); background: var(--surface); text-align: left; }
 .sidebar-collapse:hover { color: var(--text-primary); background: var(--surface-raised); }
 .workspace.sidebar-collapsed .sidebar-footer { display: none; }
-.workspace.sidebar-collapsed .sidebar-collapse { justify-content: center; padding-inline: 0; }
+.workspace.sidebar-collapsed .sidebar-collapse { justify-content: center; margin-top: auto; padding-inline: 0; }
 
 /* ---------------------------------------------------------- Conversation list */
 .chat-history-section { min-height: 0; flex: 1 1 auto; margin-top: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); overflow: hidden; }
@@ -461,8 +466,8 @@ input:disabled, select:disabled, textarea:disabled { color: var(--text-muted); b
 .state-icon { width: 48px; height: 48px; display: grid; place-items: center; margin-bottom: var(--space-3); border-radius: var(--radius-medium); color: var(--warning-text); background: var(--warning-surface); }
 
 /* -------------------------------------------------------------- Dialogs/Share */
-.modal-backdrop { position: fixed; z-index: 40; inset: 0; display: grid; place-items: center; padding: var(--space-5); background: rgb(2 6 23 / 55%); }
-.modal-card { position: relative; width: min(100%, 560px); max-height: min(90vh, 800px); overflow: auto; padding: clamp(24px, 3vw, 32px); border: 1px solid var(--border); border-radius: var(--radius-large); color: var(--text-primary); background: var(--surface); box-shadow: 0 24px 90px rgb(6 27 20 / 33%); }
+.modal-backdrop { position: fixed; z-index: 40; inset: 0; display: grid; place-items: center; padding: var(--space-5); background: var(--overlay); }
+.modal-card { position: relative; width: min(100%, 560px); max-height: min(90vh, 800px); overflow: auto; padding: clamp(24px, 3vw, 32px); border: 1px solid var(--border); border-radius: var(--radius-large); color: var(--text-primary); background: var(--surface); box-shadow: 0 24px 90px var(--dialog-shadow); }
 .modal-card h2 { margin: var(--space-2) 0 var(--space-3); }
 .modal-card p { line-height: 1.55; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-5); }
@@ -507,8 +512,9 @@ input:disabled, select:disabled, textarea:disabled { color: var(--text-muted); b
   color: var(--text-muted);
 }
 .chat-header-search-field .icon-button:hover { color: var(--danger); background: transparent; }
+.chat-mobile-toolbar-row { display: none; }
 
-.workspace.sidebar-collapsed .chat-new-button { width: 42px; min-width: 42px; height: 42px; align-self: center; padding: 0; overflow: hidden; font-size: 0; }
+.workspace.sidebar-collapsed .chat-new-button { width: 44px; min-width: 44px; height: 44px; align-self: center; padding: 0; overflow: hidden; font-size: 0; }
 .workspace.sidebar-collapsed .chat-new-button svg { flex: 0 0 auto; }
 
 .consent-dialog { max-width: 520px; }
@@ -516,10 +522,11 @@ input:disabled, select:disabled, textarea:disabled { color: var(--text-muted); b
 .message-consent-row { margin-top: var(--space-5); padding-top: var(--space-4); display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); border-top: 1px solid var(--border); }
 .message-consent-row strong { color: var(--text-primary); font-size: var(--font-small); }
 .message-consent-row p { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
-.consent-switch { width: 46px; height: 26px; flex: 0 0 46px; padding: 3px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-raised); }
-.consent-switch span { width: 18px; height: 18px; display: block; border-radius: 50%; background: var(--text-muted); transition: transform 160ms ease, background 160ms ease; }
-.consent-switch[aria-checked="true"] { border-color: var(--accent); background: var(--accent); }
-.consent-switch[aria-checked="true"] span { transform: translateX(20px); background: var(--surface); }
+.consent-switch { position: relative; width: 44px; height: 44px; flex: 0 0 44px; padding: 0; display: grid; place-items: center; border: 0; background: transparent; }
+.consent-switch::before { width: 40px; height: 22px; content: ""; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-raised); }
+.consent-switch span { position: absolute; top: 15px; left: 5px; width: 14px; height: 14px; display: block; border-radius: 50%; background: var(--text-muted); transition: transform 160ms ease, background 160ms ease; }
+.consent-switch[aria-checked="true"]::before { border-color: var(--accent); background: var(--accent); }
+.consent-switch[aria-checked="true"] span { transform: translateX(18px); background: var(--surface); }
 .consent-switch:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 .consent-switch:disabled { opacity: 0.6; cursor: wait; }
 
