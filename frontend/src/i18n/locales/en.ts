@@ -128,6 +128,7 @@ const en = {
   consentToSendToAI: 'I agree to send this message to Dahl Inference, an external AI provider, to generate a reply. This message may contain sensitive health information.',
   aiConsentRequired: 'Please agree to send this message to the AI provider before sending.',
   aiProviderNeedsBalance: 'AI replies are unavailable because the Dahl provider key has no available balance.',
+  aiProviderAuthFailed: 'AI replies are unavailable because Dahl rejected the provider key. Check the key in the backend configuration.',
   aiReplyReady: 'AI reply received. It is general information and has not been reviewed by a clinician.',
   messagesSaved: 'Message saved for clinician review.',
   searchConversations: 'Search conversations', searchTitles: 'Search titles', clearSearch: 'Clear search', hideSearch: 'Hide search', noConversations: 'No conversations yet',

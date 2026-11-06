@@ -18,13 +18,13 @@ type Overview = { users: number; patients: number; doctors_pending_verification:
 type ThemeMode = 'system' | 'light' | 'dark'
 type ShareLink = { id: string; created_at: string; expires_at: string; revoked_at: string | null; active: boolean }
 type PublicConversation = { preferred_language: string; created_at: string; messages: { sender_role: string; body: string; created_at: string }[] }
-type ApiErrorCode = 'network' | 'invalid' | 'duplicate' | 'unavailable' | 'quota' | 'credentials' | 'generic'
+type ApiErrorCode = 'network' | 'invalid' | 'duplicate' | 'unavailable' | 'quota' | 'providerAuth' | 'credentials' | 'generic'
 
 const API = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
 const LANGUAGES = [{ value: 'en', label: 'English' }, { value: 'tw', label: 'Twi' }, { value: 'ee', label: 'Ewe' }, { value: 'gaa', label: 'Ga' }, { value: 'ha', label: 'Hausa' }]
 const errorKeys: Record<ApiErrorCode, TranslationKey> = {
   network: 'networkUnavailable', invalid: 'invalidForm', duplicate: 'duplicateAccount',
-  unavailable: 'serviceTemporarilyUnavailable', quota: 'aiProviderNeedsBalance', credentials: 'errorCredentials', generic: 'errorGeneric',
+  unavailable: 'serviceTemporarilyUnavailable', quota: 'aiProviderNeedsBalance', providerAuth: 'aiProviderAuthFailed', credentials: 'errorCredentials', generic: 'errorGeneric',
 }
 
 class ApiError extends Error {
@@ -65,6 +65,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     if (response.status === 422) code = 'invalid'
     else if (response.status === 409 && /already exists/i.test(detailText)) code = 'duplicate'
     else if (response.status === 503 && /AI provider has no available balance/i.test(detailText)) code = 'quota'
+    else if (response.status === 503 && /AI provider authentication failed/i.test(detailText)) code = 'providerAuth'
     else if (response.status === 503 || response.status >= 500) code = 'unavailable'
     else if (response.status === 401) code = 'credentials'
     throw new ApiError(response.status, code)
@@ -127,6 +128,7 @@ function App() {
   })
   const chatBodyRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
+  const aiConsentRef = useRef<HTMLInputElement>(null)
   const conversationDialogOpener = useRef<HTMLButtonElement | null>(null)
   const conversationDialogRef = useRef<HTMLElement>(null)
   const shareDialogOpener = useRef<HTMLElement | null>(null)
@@ -394,7 +396,11 @@ function App() {
   async function sendChatMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(''); setSuccess('')
     if (!storeConsent) { openConsentModal(composerRef.current); return }
-    if (!aiConsentChecked) { setError(t('aiConsentRequired')); return }
+    if (!aiConsentChecked) {
+      setError(t('aiConsentRequired'))
+      aiConsentRef.current?.focus()
+      return
+    }
     const message = messageDraft.trim()
     if (message.length < 5) { setError(t('invalidForm')); return }
     setSendingRequest(true)
@@ -910,9 +916,9 @@ function App() {
                   <p>{t('chatEmptyBody')}</p>
                 </div>}</div>
                 <form className="chat-composer" onSubmit={(event) => void sendChatMessage(event)}>
-                  <label className="consent-control ai-consent-control"><input type="checkbox" checked={aiConsentChecked} onChange={(event) => setAiConsentChecked(event.target.checked)} /><span>{t('consentToSendToAI')}</span></label>
+                  <label className="consent-control ai-consent-control"><input ref={aiConsentRef} type="checkbox" checked={aiConsentChecked} onChange={(event) => setAiConsentChecked(event.target.checked)} /><span>{t('consentToSendToAI')}</span></label>
                   <textarea ref={composerRef} rows={2} value={messageDraft} onChange={(event) => { setMessageDraft(event.target.value); setAiConsentChecked(false) }} onFocus={() => { if (!storeConsent && !consentFocusGuard.current) openConsentModal(composerRef.current) }} maxLength={4000} minLength={5} required aria-label={t('messagePlaceholder')} placeholder={t('messagePlaceholder')} />
-                  <Button type="submit" disabled={sendingRequest || messageDraft.trim().length < 5 || !aiConsentChecked} icon={<Icon name="send" size={18} />}><span className="send-text">{sendingRequest ? t('saving') : t('send')}</span></Button>
+                  <Button type="submit" disabled={sendingRequest || messageDraft.trim().length < 5} icon={<Icon name="send" size={18} />}><span className="send-text">{sendingRequest ? t('saving') : t('send')}</span></Button>
                 </form>
               </div>
             </div>

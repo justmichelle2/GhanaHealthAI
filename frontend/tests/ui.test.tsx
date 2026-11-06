@@ -139,4 +139,20 @@ describe('message consent', () => {
     await user.click(screen.getByRole('button', { name: /send/i }))
     await screen.findByRole('heading', { name: /ask a health question/i })
   })
+
+  it('keeps send clickable for a valid draft and points to the required AI consent', async () => {
+    const user = userEvent.setup()
+    await signInAndOpenAssistant(user)
+    const textbox = screen.getByRole('textbox', { name: /write a message/i })
+    fireEvent.focus(textbox)
+    await screen.findByRole('dialog', { name: /before you start/i })
+    await user.click(screen.getByRole('checkbox', { name: /i consent to storing my messages for clinician review/i }))
+    await user.click(screen.getByRole('button', { name: /accept and continue/i }))
+    await user.type(textbox, 'Hello, I have a question.')
+
+    const sendButton = screen.getByRole('button', { name: /send/i })
+    expect(sendButton).toBeEnabled()
+    await user.click(sendButton)
+    expect(await screen.findByText(/please agree to send this message to the ai provider/i)).toBeInTheDocument()
+  })
 })
