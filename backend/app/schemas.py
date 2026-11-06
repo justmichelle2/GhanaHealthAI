@@ -75,15 +75,16 @@ class PatientConsentUpdate(BaseModel):
 
 class ConversationCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    message: str = Field(min_length=5, max_length=4000)
+    message: str = Field(min_length=1, max_length=4000)
     preferred_language: Literal["en", "tw", "ee", "gaa", "ha"]
     consent_to_store: Literal[True]
+    consent_to_ai: Literal[True]
     @field_validator("message")
     @classmethod
     def trim_message(cls, value: str) -> str:
         value = value.strip()
-        if len(value) < 5:
-            raise ValueError("Message must contain at least 5 non-space characters")
+        if not value:
+            raise ValueError("Message cannot be blank")
         return value
 
 class ConversationSummary(BaseModel):
@@ -144,14 +145,15 @@ class ShareTokenRequest(BaseModel):
 
 class ConversationMessageCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    message: str = Field(min_length=5, max_length=4000)
+    message: str = Field(min_length=1, max_length=4000)
     consent_to_store: Literal[True]
+    consent_to_ai: Literal[True]
     @field_validator("message")
     @classmethod
     def trim_message(cls, value: str) -> str:
         value = value.strip()
-        if len(value) < 5:
-            raise ValueError("Message must contain at least 5 non-space characters")
+        if not value:
+            raise ValueError("Message cannot be blank")
         return value
 
 class DoctorReviewItem(BaseModel):

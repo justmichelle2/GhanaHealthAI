@@ -31,7 +31,7 @@ async def security_headers(request, call_next):
 
 @app.get("/", tags=["root"])
 def read_root():
-    return {"service": "Ghana Health Assistant API", "status": "ok", "version": "0.3.0", "note": "Health information is not clinically validated; no automated medical answers are available."}
+    return {"service": "Ghana Health Assistant API", "status": "ok", "version": "0.3.0", "note": "AI replies provide general information and are not clinically validated."}
 
 @app.get("/health", tags=["health"])
 def health_check():

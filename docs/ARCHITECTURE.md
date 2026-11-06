@@ -13,7 +13,7 @@ This React, TypeScript, and FastAPI application provides patient accounts, multi
 - Cookie-backed authenticated patient, clinician, and administrator workspaces.
 - Patient profile, language preference, searchable conversation history, System/Light/Dark theme, and safety notices.
 - Patient messages can be saved to owned conversations; patients can open, rename, delete, and copy a conversation to clipboard. No public share links are created.
-- The chat composer sends consented messages to clinician review. No automated health answer or speech processing is connected.
+- With explicit consent, the chat composer sends the current message to Dahl Inference and saves its generated reply with the conversation for clinician review. Replies are general information and are not clinically validated.
 - Doctor queue shows only pending or reviewed requests; clinician notes are internal and not sent to patients.
 - Admin user state, clinician verification action, overview counts, and audit log.
 - No frontend role choice or account data is hardcoded.
@@ -36,7 +36,7 @@ This React, TypeScript, and FastAPI application provides patient accounts, multi
 
 - users, patient_profiles, doctor_profiles, audit_logs.
 - conversations include patient owner, selected language, consent timestamp, status, and reviewer metadata.
-- conversation_messages store patient message text; no AI-generated messages are written.
+- conversation_messages store patient messages and generated assistant replies.
 - Conversation title and updated_at support patient search and recent activity ordering. Automatic titles do not repeat message text.
 - clinician review notes are distinct from patient messages and are not shown to patients.
 - Patient endpoints filter by authenticated owner. Clinician endpoints require verified clinician role. Admin endpoints require administrator role.
@@ -49,9 +49,9 @@ Alembic revisions 0001 through 0007 add authentication, profiles, patient messag
 
 1. A patient registers; server assigns the patient role and stores only the password hash.
 2. Patient profile stores display name and language preference.
-3. A patient message requires explicit storage consent. Only the owning patient can retrieve, rename, or delete their conversation. A clinician can review message content when the account is verified.
-4. The submission is marked pending_review and is visible only to its owner and a verified clinician.
-5. A clinician can review the conversation, record an internal note, and mark it reviewed. New patient messages reopen the review status. The system does not generate a reply.
+3. A patient message requires consent to store and send it to the external AI provider. Only the owning patient can retrieve, rename, or delete their conversation. A clinician can review message content when the account is verified.
+4. Dahl receives the current message only. Its generated reply is stored with the patient message and the conversation remains pending_review.
+5. A clinician can review the conversation, record an internal note, and mark it reviewed. New patient messages reopen the review status; AI replies are not clinician-reviewed.
 6. Admin can inspect accounts, verify clinician profiles after independent credential checks, manage active status, and inspect audit metadata.
 
 ## Planned architecture — not implemented
@@ -85,4 +85,4 @@ Alembic revisions 0001 through 0007 add authentication, profiles, patient messag
 - Public registration cannot create a doctor or administrator.
 - First admin and unverified clinician onboarding are local operator commands; clinician credentials must be verified independently before approval.
 - User suspension, verification, and review actions are audited.
-- No recovery-email flow, document ingestion, AI response engine, speech processing, or triage rules are implemented yet.
+- No approved medical knowledge retrieval, clinical validation, emergency triage rules, speech processing, or source citations are implemented. AI replies are general information only.
