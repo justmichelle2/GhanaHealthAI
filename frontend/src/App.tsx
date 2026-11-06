@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { loadInterfaceLanguage, translate, type InterfaceLanguage, type TranslationKey } from './i18n/resources'
 
 type User = { id: string; email: string; role: 'patient' | 'doctor' | 'admin'; is_active: boolean; created_at: string }
-type Profile = { full_name: string | null; preferred_language: string | null }
+type Profile = { full_name: string | null; preferred_language: string | null; message_storage_consent: boolean }
 type Conversation = { id: string; title: string; preferred_language: string; status: string; created_at: string; updated_at: string }
 type ChatMessage = { id: string; sender_role: string; body: string; created_at: string }
 type ConversationDetail = Conversation & { messages: ChatMessage[] }
@@ -71,7 +71,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 function App() {
   const [page, setPage] = useState<Page>('loading')
   const [user, setUser] = useState<User | null>(null)
-  const [profile, setProfile] = useState<Profile>({ full_name: null, preferred_language: 'en' })
+  const [profile, setProfile] = useState<Profile>({ full_name: null, preferred_language: 'en', message_storage_consent: false })
   const [submissions, setSubmissions] = useState<Conversation[]>([])
   const [chatResults, setChatResults] = useState<Conversation[]>([])
   const [pending, setPending] = useState<Review[]>([])
@@ -107,12 +107,18 @@ function App() {
   const [replies, setReplies] = useState<Record<string, string>>({})
   const [messageDraft, setMessageDraft] = useState('')
   const [storeConsent, setStoreConsent] = useState(false)
+  const [consentDialogOpen, setConsentDialogOpen] = useState(false)
+  const [consentDialogChecked, setConsentDialogChecked] = useState(false)
   const [sendingRequest, setSendingRequest] = useState(false)
   const [selectedChat, setSelectedChat] = useState<ConversationDetail | null>(null)
   const [chatSearch, setChatSearch] = useState('')
+  const [chatTranscriptSearch, setChatTranscriptSearch] = useState('')
+  const [chatSearchOpen, setChatSearchOpen] = useState(false)
+  const [chatOverflowOpen, setChatOverflowOpen] = useState(false)
   const [chatBusy, setChatBusy] = useState(false)
   const [chatDrawerOpen, setChatDrawerOpen] = useState(false)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('gha-sidebar-collapsed') === 'true')
+  const [mobileAccountOpen, setMobileAccountOpen] = useState(false)
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem('gha-theme')
     return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'system'
@@ -123,6 +129,7 @@ function App() {
   const conversationDialogRef = useRef<HTMLElement>(null)
   const shareDialogOpener = useRef<HTMLElement | null>(null)
   const shareDialogRef = useRef<HTMLElement>(null)
+  const consentDialogRef = useRef<HTMLElement>(null)
   const bootHashRef = useRef(window.location.hash)
 
   useEffect(() => {
@@ -176,6 +183,27 @@ function App() {
   }, [shareDialogOpen])
 
   useEffect(() => {
+    if (page === 'assistant' && !storeConsent) { setConsentDialogChecked(false); setConsentDialogOpen(true) }
+  }, [page, storeConsent])
+
+  useEffect(() => {
+    if (!consentDialogOpen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setConsentDialogOpen(false); setConsentDialogChecked(false) }
+      if (event.key === 'Tab' && consentDialogRef.current) {
+        const controls = [...consentDialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled])')]
+        if (controls.length < 2) return
+        const first = controls[0], last = controls[controls.length - 1]
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    consentDialogRef.current?.querySelector<HTMLInputElement>('input')?.focus()
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [consentDialogOpen])
+
+  useEffect(() => {
     localStorage.setItem('gha-theme', themeMode)
     const media = window.matchMedia('(prefers-color-scheme: dark)')
     const applyTheme = () => {
@@ -187,6 +215,15 @@ function App() {
     media.addEventListener('change', applyTheme)
     return () => media.removeEventListener('change', applyTheme)
   }, [themeMode])
+
+  useEffect(() => { localStorage.setItem('gha-sidebar-collapsed', String(sidebarCollapsed)) }, [sidebarCollapsed])
+
+  useEffect(() => {
+    if (!chatDrawerOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setChatDrawerOpen(false) }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [chatDrawerOpen])
 
   useEffect(() => {
     localStorage.setItem('gha-interface-language', interfaceLanguage)
@@ -338,6 +375,19 @@ function App() {
     finally { setBusy(false) }
   }
 
+  async function changeMessageConsent(next: boolean) {
+    setError(''); setSuccess('')
+    if (!next && !window.confirm('You will be asked to consent again before your next message.')) return
+    if (!next) setStoreConsent(false)
+    setBusy(true)
+    try {
+      const saved = await request<Profile>('/patient/consent', { method: 'PATCH', body: JSON.stringify({ message_storage_consent: next }) })
+      setProfile(saved)
+      setSuccess(next ? 'Message storage consent saved.' : 'Message storage consent withdrawn.')
+    } catch (reason) { setError(describeError(reason, 'unableSaveProfile')) }
+    finally { setBusy(false) }
+  }
+
   async function openChat(id: string) {
     setError(''); setSuccess(''); setChatBusy(true)
     try {
@@ -347,7 +397,7 @@ function App() {
     finally { setChatBusy(false) }
   }
 
-  function newChat() { setSelectedChat(null); setMessageDraft(''); setStoreConsent(false); setPage('assistant'); setChatDrawerOpen(false); setError(''); setSuccess('') }
+  function newChat() { setSelectedChat(null); setMessageDraft(''); setStoreConsent(false); setConsentDialogChecked(false); setConsentDialogOpen(true); setPage('assistant'); setChatDrawerOpen(false); setError(''); setSuccess('') }
 
   async function sendChatMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(''); setSuccess('')
@@ -492,6 +542,7 @@ function App() {
 
   const languageName = (value: string) => LANGUAGES.find((item) => item.value === value)?.label || value.toUpperCase()
   const displayName = profile.full_name || user?.email.split('@')[0] || 'there'
+  const visibleMessages = selectedChat?.messages.filter((message) => !chatTranscriptSearch.trim() || message.body.toLocaleLowerCase().includes(chatTranscriptSearch.trim().toLocaleLowerCase())) ?? []
   const roleName = user ? (user.role === 'patient' ? t('patient') : user.role === 'doctor' ? t('clinician') : t('adminRole')) : ''
   const patientNav = [
     { key: 'dashboard' as const, label: t('overviewNav'), icon: '⌂' },
@@ -505,7 +556,7 @@ function App() {
   ]
   const conversationHistory = <div className="chat-history-section">
     <div className="chat-history-title">{t('conversations')}</div>
-    <button className="button button-primary chat-new-button" onClick={newChat}>＋ {t('newChat')}</button>
+    <button className="button button-primary chat-new-button" aria-label={t('newChat')} title={t('newChat')} onClick={newChat}>＋ {t('newChat')}</button>
     <label className="chat-search">
       <span>{t('searchConversations')}</span>
       <input type="search" value={chatSearch} onChange={(event) => void searchChats(event.target.value)} placeholder={t('searchTitles')} />
@@ -560,6 +611,15 @@ function App() {
           <span className="session-badge"><i /> {t('secureSession')}</span>
           <span className="user-chip">{user.role === 'patient' ? displayName : user.email}</span>
           <button className="button button-outline button-small" onClick={() => void logout()} disabled={busy}>{t('signOut')}</button>
+          <div className="mobile-account">
+            <button className="mobile-avatar" aria-label="Account menu" aria-expanded={mobileAccountOpen} onClick={() => setMobileAccountOpen((open) => !open)}>M</button>
+            {mobileAccountOpen && <div className="mobile-account-menu" role="menu">
+              {user.role === 'patient' && <button role="menuitem" onClick={() => { navigate('profile'); setMobileAccountOpen(false) }}>{t('profileAndSettings')}</button>}
+              <label>{t('colorTheme')}<select value={themeMode} onChange={(event) => setThemeMode(event.target.value as ThemeMode)}><option value="system">{t('systemTheme')}</option><option value="light">{t('lightTheme')}</option><option value="dark">{t('darkTheme')}</option></select></label>
+              <label>{t('languageLabel')}<select value={interfaceLanguage} onChange={(event) => setInterfaceLanguage(event.target.value as InterfaceLanguage)}>{LANGUAGES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+              <button role="menuitem" onClick={() => void logout()} disabled={busy}>{t('signOut')}</button>
+            </div>}
+          </div>
         </> : !['login', 'register', 'forgot', 'reset', 'shared'].includes(page) && <>
           <button className="button button-quiet" onClick={() => beginAuth('login')}>{t('signIn')}</button>
           <button className="button button-primary button-small" onClick={() => beginAuth('register')}>{t('createAccount')}</button>
@@ -733,7 +793,6 @@ function App() {
           <div className="sidebar-brand">
             <span className="brand-mark">+</span>
             <strong>Ghana Health</strong>
-            <button className="sidebar-collapse" onClick={() => setSidebarCollapsed((collapsed) => !collapsed)} aria-label={sidebarCollapsed ? t('expandSidebar') : t('collapseSidebar')}>{sidebarCollapsed ? '›' : '‹'}</button>
           </div>
           <div className="sidebar-role">
             <span className="role-avatar">{user.role === 'patient' ? (displayName[0] || 'P').toUpperCase() : user.role === 'doctor' ? 'C' : 'A'}</span>
@@ -747,16 +806,17 @@ function App() {
           </button>)}</nav>}
           {user.role === 'patient' && page === 'assistant' && conversationHistory}
           {user.role === 'doctor' && <nav className="side-nav" aria-label={t('clinicianNavigation')}>
-            <button className="nav-item active" aria-current="page"><span>◷</span>{t('reviewWorkspace')}</button>
+            <button className="nav-item active" aria-current="page" aria-label={t('reviewWorkspace')}><span>◷</span>{t('reviewWorkspace')}</button>
           </nav>}
           {user.role === 'admin' && <nav className="side-nav" aria-label={t('administratorNavigation')}>
-            <button className="nav-item active" aria-current="page"><span>▦</span>{t('administration')}</button>
+            <button className="nav-item active" aria-current="page" aria-label={t('administration')}><span>▦</span>{t('administration')}</button>
           </nav>}
           <div className="sidebar-footer">
             <div className="privacy-mark">◇</div>
             <strong>{t('privacyMatters')}</strong>
             <p>{t('privacyMattersBody')}</p>
           </div>
+          <button className="sidebar-collapse" aria-expanded={!sidebarCollapsed} aria-label={sidebarCollapsed ? t('expandSidebar') : t('collapseSidebar')} title={sidebarCollapsed ? t('expandSidebar') : t('collapseSidebar')} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}><span aria-hidden="true">{sidebarCollapsed ? '›' : '‹'}</span><span className="collapse-label">Collapse</span></button>
         </aside>
         <main className="main-content">
           <div className="content-topline">
@@ -813,13 +873,17 @@ function App() {
                     <strong>{selectedChat?.title || t('newConversation')}</strong>
                     <small><i /> {selectedChat ? (selectedChat.status === 'pending_review' ? t('awaitingReview') : t('reviewedByClinician')) : t('privateConversation')}</small>
                   </div>
+                  <button className="icon-button mobile-only" onClick={() => setChatSearchOpen((open) => !open)} aria-label="Search conversation" aria-expanded={chatSearchOpen}>⌕</button>
                   <button className="icon-button" onClick={() => void shareChat(selectedChat)} disabled={!selectedChat} aria-label={t('shareConversation')}>↗</button>
+                  <button className="icon-button mobile-only" onClick={() => setChatOverflowOpen((open) => !open)} aria-label="More conversation options" aria-expanded={chatOverflowOpen}>⋯</button>
                 </div>
-                <div className="chat-body" ref={chatBodyRef} aria-live="polite">{selectedChat?.messages.length ? <div className="chat-messages">{selectedChat.messages.map((message) => <article className={message.sender_role === 'patient' ? 'chat-message patient-message' : message.sender_role === 'doctor' ? 'chat-message clinician-message' : 'chat-message assistant-message'} key={message.id}>
+                {chatSearchOpen && <div className="chat-toolbar-search"><input type="search" autoFocus aria-label="Search messages" placeholder="Search this conversation" value={chatTranscriptSearch} onChange={(event) => setChatTranscriptSearch(event.target.value)} /></div>}
+                {chatOverflowOpen && <div className="chat-toolbar-overflow"><label className="language-picker">{t('conversationLanguageLabel')}<select value={language} onChange={(event) => setLanguage(event.target.value)}>{LANGUAGES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label></div>}
+                <div className="chat-body" ref={chatBodyRef} aria-live="polite">{visibleMessages.length ? <div className="chat-messages">{visibleMessages.map((message) => <article className={message.sender_role === 'patient' ? 'chat-message patient-message' : message.sender_role === 'doctor' ? 'chat-message clinician-message' : 'chat-message assistant-message'} key={message.id}>
                   <span>{message.sender_role === 'patient' ? t('you') : message.sender_role === 'doctor' ? t('clinician') : t('healthAssistantRole')} · {new Date(message.created_at).toLocaleString()}</span>
                   <p>{message.body}</p>
                 </article>)}
-                  {selectedChat.messages.every((message) => message.sender_role === 'patient') && <div className="assistant-unavailable"><strong>{t('noAutomatedAnswer')}</strong><p>{t('savedForReview')}</p></div>}
+                  {selectedChat?.messages.every((message) => message.sender_role === 'patient') && <div className="assistant-unavailable"><strong>{t('noAutomatedAnswer')}</strong><p>{t('savedForReview')}</p></div>}
                 </div> : <div className="assistant-placeholder">
                   <span className="placeholder-symbol">✳</span>
                   <h2>{t('askHealthQuestion')}</h2>
@@ -861,6 +925,10 @@ function App() {
                 <p>{t('privacySafetyBody')}</p>
                 <p>{t('sessionPrivacy')}</p>
                 <span className="pill pill-waiting">{t('clinicianOnly')}</span>
+                <div className="message-consent-row">
+                  <div><strong>Store my messages for clinician review</strong><p>Choose whether your messages may be stored for review by an authorized clinician.</p></div>
+                  <button className="consent-switch" type="button" role="switch" aria-label="Store my messages for clinician review" aria-checked={profile.message_storage_consent} disabled={busy} onClick={() => void changeMessageConsent(!profile.message_storage_consent)}><span /></button>
+                </div>
                 <label className="theme-setting" htmlFor="theme-setting">{t('colorTheme')}<select id="theme-setting" value={themeMode} onChange={(event) => setThemeMode(event.target.value as ThemeMode)}>
                   <option value="system">{t('system')}</option>
                   <option value="light">{t('light')}</option>
@@ -917,6 +985,16 @@ function App() {
             </article>)}</div>
           </section>}
         </main>
+      </div>}
+
+      {consentDialogOpen && page === 'assistant' && <div className="modal-backdrop" role="presentation">
+        <section className="modal-card consent-dialog" ref={consentDialogRef} role="dialog" aria-modal="true" aria-labelledby="consent-dialog-title" aria-describedby="consent-dialog-description">
+          <span className="eyebrow">{t('privacySafety')}</span>
+          <h2 id="consent-dialog-title">Consent to store this message</h2>
+          <p id="consent-dialog-description">Your message can be stored in your account and reviewed by an authorized clinician. Automated answers are not available.</p>
+          <label className="consent-control dialog-consent"><input className="consent-checkbox" type="checkbox" checked={consentDialogChecked} onChange={(event) => setConsentDialogChecked(event.target.checked)} /><span>I agree to store the message I choose to send for clinician review.</span></label>
+          <div className="dialog-actions"><button className="button button-outline" onClick={() => { setConsentDialogOpen(false); setConsentDialogChecked(false) }}>{t('cancel')}</button><button className="button button-primary" disabled={!consentDialogChecked} onClick={() => { setStoreConsent(true); setConsentDialogOpen(false); setConsentDialogChecked(false) }}>Continue</button></div>
+        </section>
       </div>}
 
       {conversationDialog && <div className="modal-backdrop" role="presentation">
