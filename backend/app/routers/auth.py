@@ -1,5 +1,6 @@
 import hmac
 import hashlib
+import jwt
 import logging
 import secrets
 import smtplib
@@ -11,17 +12,19 @@ from sqlalchemy import case, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from uuid import UUID
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.security import DUMMY_PASSWORD_HASH, create_access_token, hash_password, new_csrf_token, verify_password
+from app.core.security import DUMMY_PASSWORD_HASH, create_access_token, create_refresh_token, hash_password, new_csrf_token, verify_password
 from app.dependencies import get_current_user, require_role
-from app.models import AuditLog, PasswordResetToken, PatientProfile, RateLimitBucket, User, UserRole
+from app.models import AuditLog, PasswordResetToken, PatientProfile, RateLimitBucket, RefreshToken, User, UserRole
 from app.schemas import LoginRequest, PasswordResetConfirm, PasswordResetRequest, RegisterRequest, UserResponse
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 logger = logging.getLogger("ghana_health.auth")
 ACCESS_COOKIE = "gha_access"
 CSRF_COOKIE = "gha_csrf"
+REFRESH_COOKIE = "gha_refresh"
 
 def check_csrf(cookie_token: str | None, header_token: str | None) -> None:
     if not cookie_token or not header_token or not hmac.compare_digest(cookie_token, header_token):
@@ -86,11 +89,21 @@ def enforce_limit(db: Session, key: str, *, maximum: int, window: timedelta, now
     bucket.attempts += 1
     return True
 
-def set_session(response: Response, user: User, csrf_token: str) -> None:
+def set_session(response: Response, user: User, csrf_token: str, db: Session) -> None:
     settings = get_settings()
     age = settings.access_token_expire_minutes * 60
     response.set_cookie(ACCESS_COOKIE, create_access_token(str(user.id), user.session_version), max_age=age, httponly=True, secure=settings.secure_cookies, samesite="lax", path="/")
     response.set_cookie(CSRF_COOKIE, csrf_token, max_age=age, httponly=False, secure=settings.secure_cookies, samesite="lax", path="/")
+    now = datetime.now(timezone.utc)
+    raw_refresh = secrets.token_urlsafe(48)
+    refresh = RefreshToken(
+        user_id=user.id,
+        token_hash=token_digest(raw_refresh),
+        expires_at=now + timedelta(days=settings.refresh_token_expire_days),
+        created_at=now,
+    )
+    db.add(refresh)
+    response.set_cookie(REFRESH_COOKIE, raw_refresh, max_age=settings.refresh_token_expire_days * 86400, httponly=True, secure=settings.secure_cookies, samesite="lax", path="/")
 
 @router.get("/csrf", status_code=204)
 def issue_csrf(response: Response) -> None:
@@ -175,7 +188,7 @@ def register(payload: RegisterRequest, response: Response, csrf_cookie: str | No
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="An account with this email already exists") from None
-    set_session(response, user, new_csrf_token())
+    set_session(response, user, new_csrf_token(), db)
     return user
 
 @router.post("/login", response_model=UserResponse)
@@ -194,7 +207,7 @@ def login(payload: LoginRequest, request: Request, response: Response, csrf_cook
     if user is None or not matches or not user.is_active:
         db.commit()
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    set_session(response, user, new_csrf_token())
+    set_session(response, user, new_csrf_token(), db)
     db.add(AuditLog(actor_user_id=user.id, action="login", resource_type="user", resource_id=str(user.id)))
     db.commit()
     return user
@@ -203,11 +216,63 @@ def login(payload: LoginRequest, request: Request, response: Response, csrf_cook
 def who_am_i(user: User = Depends(get_current_user)) -> User:
     return user
 
-@router.post("/logout", status_code=204)
-def logout(response: Response, csrf_cookie: str | None = Cookie(default=None, alias=CSRF_COOKIE), csrf_header: str | None = Header(default=None, alias="X-CSRF-Token"), user: User = Depends(get_current_user)) -> None:
+
+@router.post("/refresh", status_code=200)
+def refresh_session(response: Response, csrf_cookie: str | None = Cookie(default=None, alias=CSRF_COOKIE), csrf_header: str | None = Header(default=None, alias="X-CSRF-Token"), refresh_cookie: str | None = Cookie(default=None, alias=REFRESH_COOKIE), db: Session = Depends(get_db)) -> dict[str, str]:
+    settings = get_settings()
     check_csrf(csrf_cookie, csrf_header)
+    if not refresh_cookie:
+        raise HTTPException(status_code=401, detail="No refresh token")
+    now = datetime.now(timezone.utc)
+    try:
+        claims = decode_refresh_token(refresh_cookie)
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    user_id = UUID(claims["sub"])
+    refresh = db.scalar(select(RefreshToken).where(RefreshToken.token_hash == token_digest(refresh_cookie), RefreshToken.user_id == user_id))
+    if refresh is None or refresh.revoked_at is not None or refresh.expires_at <= now:
+        raise HTTPException(status_code=401, detail="Refresh token invalid or expired")
+    user = db.get(User, user_id)
+    if user is None or not user.is_active or claims.get("ver", 0) != user.session_version:
+        raise HTTPException(status_code=401, detail="Session revoked")
+    refresh.revoked_at = now
+    raw_refresh = secrets.token_urlsafe(48)
+    db.add(RefreshToken(user_id=user.id, token_hash=token_digest(raw_refresh), expires_at=now + timedelta(days=settings.refresh_token_expire_days), created_at=now))
+    db.add(AuditLog(actor_user_id=user.id, action="token_refreshed", resource_type="user", resource_id=str(user.id)))
+    db.commit()
+    response.set_cookie(REFRESH_COOKIE, raw_refresh, max_age=settings.refresh_token_expire_days * 86400, httponly=True, secure=settings.secure_cookies, samesite="lax", path="/")
+    response.set_cookie(ACCESS_COOKIE, create_access_token(str(user.id), user.session_version), max_age=settings.access_token_expire_minutes * 60, httponly=True, secure=settings.secure_cookies, samesite="lax", path="/")
+    return {"status": "refreshed"}
+
+
+@router.post("/logout", status_code=204)
+def logout(response: Response, request: Request, refresh_cookie: str | None = Cookie(default=None, alias=REFRESH_COOKIE), csrf_cookie: str | None = Cookie(default=None, alias=CSRF_COOKIE), csrf_header: str | None = Header(default=None, alias="X-CSRF-Token"), db: Session = Depends(get_db)) -> None:
+    check_csrf(csrf_cookie, csrf_header)
+    user = None
+    access_cookie = request.cookies.get(ACCESS_COOKIE)
+    if access_cookie:
+        try:
+            claims = decode_access_token(access_cookie)
+            user = db.get(User, UUID(claims["sub"]))
+        except (jwt.PyJWTError, KeyError, ValueError):
+            pass
+    if refresh_cookie:
+        try:
+            rclaims = decode_refresh_token(refresh_cookie)
+            rid = UUID(rclaims["sub"])
+            if user is None or str(user.id) != str(rid):
+                user = db.get(User, rid)
+            refresh = db.scalar(select(RefreshToken).where(RefreshToken.token_hash == token_digest(refresh_cookie), RefreshToken.user_id == rid))
+            if refresh is not None:
+                refresh.revoked_at = datetime.now(timezone.utc)
+        except jwt.PyJWTError:
+            pass
+    if user is not None:
+        db.add(AuditLog(actor_user_id=user.id, action="logout", resource_type="user", resource_id=str(user.id)))
+    db.commit()
     response.delete_cookie(ACCESS_COOKIE, path="/", samesite="lax")
     response.delete_cookie(CSRF_COOKIE, path="/", samesite="lax")
+    response.delete_cookie(REFRESH_COOKIE, path="/", samesite="lax")
 
 @router.get("/patient", response_model=UserResponse)
 def patient_access(user: User = Depends(require_role(UserRole.PATIENT))) -> User:

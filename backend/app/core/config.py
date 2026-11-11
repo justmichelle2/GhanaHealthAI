@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     password_reset_minutes: int = 30
     dahl_api_key: str | None = None
     dahl_model: str = "MiniMaxAI/MiniMax-M2.7"
+    refresh_token_expire_days: int = 30
 
     @property
     def allowed_origins(self) -> list[str]:

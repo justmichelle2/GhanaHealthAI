@@ -154,6 +154,7 @@ html[data-theme='dark'] {
 * { box-sizing: border-box; }
 
 html, body { min-width: 320px; min-height: 100%; overflow-x: clip; }
+html { scroll-behavior: smooth; }
 
 body {
   margin: 0;

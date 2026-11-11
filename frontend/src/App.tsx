@@ -3,6 +3,11 @@ import { loadInterfaceLanguage, translate, type InterfaceLanguage, type Translat
 import { Icon, type IconName } from './components/ui/Icon'
 import { Alert } from './components/ui/Alert'
 import { Button } from './components/ui/Button'
+import { VoiceProvider } from './voice/voiceService'
+import { MicButton } from './components/voice/MicButton'
+import { LiveTranscription } from './components/voice/LiveTranscription'
+import { SpeakerButton } from './components/voice/SpeakerButton'
+import { VoiceSettings } from './components/voice/VoiceSettings'
 
 type User = { id: string; email: string; role: 'patient' | 'doctor' | 'admin'; is_active: boolean; created_at: string }
 type Profile = { full_name: string | null; preferred_language: string | null; messages_consent_given_at: string | null; ai_provider_consent_given_at: string | null }
@@ -57,7 +62,11 @@ function csrfCookie() {
   return token ? decodeURIComponent(token.slice('gha_csrf='.length)) : ''
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function refreshSession(): Promise<void> {
+  await request<void>('/auth/refresh', { method: 'POST', body: JSON.stringify({}) }, true)
+}
+
+async function request<T>(path: string, options: RequestInit = {}, retrying = false): Promise<T> {
   const method = (options.method || 'GET').toUpperCase()
   const headers = new Headers(options.headers)
   const csrf = csrfCookie()
@@ -68,6 +77,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   catch { throw new ApiError(0, 'network') }
   const body = response.status === 204 ? null : await response.json().catch(() => null) as { detail?: string | { msg?: string }[] } | null
   if (!response.ok) {
+    if (response.status === 401 && !retrying && path !== '/auth/refresh') {
+      try {
+        await refreshSession()
+        return request<T>(path, options, true)
+      } catch {
+        // Refresh token missing or expired: fall through and surface the original 401.
+      }
+    }
     const detail = body?.detail
     const detailText = typeof detail === 'string' ? detail : ''
     let code: ApiErrorCode = 'generic'
@@ -402,6 +419,11 @@ function App() {
 
   function newChat() { setSelectedChat(null); setMessageDraft(''); setPage('assistant'); setChatDrawerOpen(false); setError(''); setSuccess('') }
 
+  function handleVoiceTranscription(text: string) {
+    setMessageDraft((current) => (current.trim() ? current + ' ' + text : text))
+    setError('')
+  }
+
   async function sendChatMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(''); setSuccess('')
     if (!storeConsent) { openConsentModal(composerRef.current); return }
@@ -615,7 +637,7 @@ function App() {
   ]
 
   return (
-    <div className={user ? 'app-root authenticated' : 'app-root'}>
+    <VoiceProvider language="en"><div className={user ? 'app-root authenticated' : 'app-root'}>
       <header className="topbar">
         {user && <button className="icon-button app-menu-button mobile-only" aria-expanded={chatDrawerOpen} onClick={() => setChatDrawerOpen(true)} aria-label={t('openNavigation')}><Icon name="menu" /></button>}
         <a className="brand" href="#" onClick={(event) => { event.preventDefault(); if (user) navigate(user.role === 'patient' ? 'dashboard' : user.role); else navigate('landing') }} aria-label={t('brandHome')}>
@@ -628,7 +650,6 @@ function App() {
         <div className="topbar-right">{!user && page === 'landing' && <nav className="public-nav" aria-label={t('mainNavigation')}>
           <a href="#about">{t('publicAbout')}</a>
           <a href="#how-it-works">{t('publicHow')}</a>
-          <a href="#languages">{t('publicLanguages')}</a>
         </nav>}<label className="theme-control">
           <span className="sr-only">{t('colorTheme')}</span>
           <select aria-label={t('colorTheme')} value={themeMode} onChange={(event) => setThemeMode(event.target.value as ThemeMode)}>
@@ -936,6 +957,7 @@ function App() {
                 <div className="chat-body" ref={chatBodyRef} aria-live="polite">{selectedChat?.messages.length ? <div className="chat-messages">{selectedChat.messages.map((message) => <article className={message.sender_role === 'patient' ? 'chat-message patient-message' : message.sender_role === 'doctor' ? 'chat-message clinician-message' : 'chat-message assistant-message'} key={message.id}>
                   <span>{message.sender_role === 'patient' ? t('you') : message.sender_role === 'doctor' ? t('clinician') : t('healthAssistantRole')} · {new Date(message.created_at).toLocaleString()}</span>
                   <p>{displayMessageBody(message)}</p>
+                  {message.sender_role === 'assistant' && <SpeakerButton text={displayMessageBody(message)} />}
                 </article>)}
                   <p className="chat-notice">{t('chatNotice')}</p>
                 </div> : <div className="chat-empty-state">
@@ -943,10 +965,14 @@ function App() {
                   <h2>{t('askHealthQuestion')}</h2>
                   <p>{t('chatEmptyBody')}</p>
                 </div>}</div>
-                <form className="chat-composer" onSubmit={(event) => void sendChatMessage(event)}>
-                  {!profile.ai_provider_consent_given_at && <label className="consent-control ai-consent-control"><input ref={aiConsentRef} type="checkbox" checked={aiConsentChecked} disabled={busy || sendingRequest} onChange={(event) => { const checked = event.target.checked; setAiConsentChecked(checked); if (checked) void updateAiProviderConsent(true) }} /><span>{t('consentToSendToAI')}</span></label>}
-                  {profile.ai_provider_consent_given_at && <p className="ai-consent-saved">{t('dahlConsentSaved')}</p>}
+                <div className="voice-transcription" role="status" aria-live="polite">
+                  <LiveTranscription />
+                </div>
+                <form className="chat-composer" role="voice-input" onSubmit={(event) => void sendChatMessage(event)}>
+                  {!profile.ai_provider_consent_given_at && <label className="consent-control ai-consent-control" style={{ gridColumn: '1 / -1' }}><input ref={aiConsentRef} type="checkbox" checked={aiConsentChecked} disabled={busy || sendingRequest} onChange={(event) => { const checked = event.target.checked; setAiConsentChecked(checked); if (checked) void updateAiProviderConsent(true) }} /><span>{t('consentToSendToAI')}</span></label>}
+                  {profile.ai_provider_consent_given_at && <p className="ai-consent-saved" style={{ gridColumn: '1 / -1' }}>{t('dahlConsentSaved')}</p>}
                   <textarea ref={composerRef} rows={2} value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} onFocus={() => { if (!storeConsent && !consentFocusGuard.current) openConsentModal(composerRef.current) }} maxLength={4000} minLength={1} required aria-label={t('messagePlaceholder')} placeholder={t('messagePlaceholder')} />
+                  <MicButton onTranscription={handleVoiceTranscription} disabled={chatBusy || sendingRequest} />
                   <Button type="submit" disabled={busy || sendingRequest || messageDraft.trim().length === 0} icon={<Icon name="send" size={18} />}><span className="send-text">{sendingRequest ? t('saving') : t('send')}</span></Button>
                 </form>
               </div>
@@ -988,6 +1014,7 @@ function App() {
                   <option value="light">{t('light')}</option>
                   <option value="dark">{t('dark')}</option>
                 </select></label>
+                <VoiceSettings />
               </aside>
             </div>
           </section>}
@@ -1106,7 +1133,7 @@ function App() {
         <span>Ghana Health Assistant</span>
         <span>{t('footerService')}</span>
       </footer>
-    </div>
+    </div></VoiceProvider>
   )
 }
 
