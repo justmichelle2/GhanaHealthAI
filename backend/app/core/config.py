@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     password_reset_minutes: int = 30
     dahl_api_key: str | None = None
     dahl_model: str = "MiniMaxAI/MiniMax-M2.7"
+    voice_enabled: bool = True
+    voice_models_dir: str | None = None
 
     @property
     def allowed_origins(self) -> list[str]:

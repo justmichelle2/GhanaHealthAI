@@ -8,6 +8,7 @@ from app.routers.auth import router as auth_router
 from app.routers.patient import router as patient_router
 from app.routers.doctor import router as doctor_router
 from app.routers.admin import router as admin_router
+from app.routers.voice import router as voice_router
 
 settings = get_settings()
 logger = logging.getLogger("ghana_health.database")
@@ -17,6 +18,7 @@ app.include_router(auth_router)
 app.include_router(patient_router)
 app.include_router(doctor_router)
 app.include_router(admin_router)
+app.include_router(voice_router)
 
 @app.middleware("http")
 async def security_headers(request, call_next):
@@ -24,7 +26,7 @@ async def security_headers(request, call_next):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(self), geolocation=()")
     if settings.secure_cookies and request.url.scheme == "https":
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return response
