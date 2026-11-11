@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.security import DUMMY_PASSWORD_HASH, create_access_token, create_refresh_token, hash_password, new_csrf_token, verify_password
+from app.core.security import DUMMY_PASSWORD_HASH, create_access_token, create_refresh_token, decode_access_token, hash_password, new_csrf_token, verify_password
 from app.dependencies import get_current_user, require_role
 from app.models import AuditLog, PasswordResetToken, PatientProfile, RateLimitBucket, RefreshToken, User, UserRole
 from app.schemas import LoginRequest, PasswordResetConfirm, PasswordResetRequest, RegisterRequest, UserResponse
@@ -224,20 +224,15 @@ def refresh_session(response: Response, csrf_cookie: str | None = Cookie(default
     if not refresh_cookie:
         raise HTTPException(status_code=401, detail="No refresh token")
     now = datetime.now(timezone.utc)
-    try:
-        claims = decode_refresh_token(refresh_cookie)
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
-    user_id = UUID(claims["sub"])
-    refresh = db.scalar(select(RefreshToken).where(RefreshToken.token_hash == token_digest(refresh_cookie), RefreshToken.user_id == user_id))
+    refresh = db.scalar(select(RefreshToken).where(RefreshToken.token_hash == token_digest(refresh_cookie)))
     if refresh is None or refresh.revoked_at is not None or refresh.expires_at <= now:
         raise HTTPException(status_code=401, detail="Refresh token invalid or expired")
-    user = db.get(User, user_id)
-    if user is None or not user.is_active or claims.get("ver", 0) != user.session_version:
+    user = db.get(User, refresh.user_id)
+    if user is None or not user.is_active or refresh.session_version != user.session_version:
         raise HTTPException(status_code=401, detail="Session revoked")
     refresh.revoked_at = now
     raw_refresh = secrets.token_urlsafe(48)
-    db.add(RefreshToken(user_id=user.id, token_hash=token_digest(raw_refresh), expires_at=now + timedelta(days=settings.refresh_token_expire_days), created_at=now))
+    db.add(RefreshToken(user_id=user.id, token_hash=token_digest(raw_refresh), expires_at=now + timedelta(days=settings.refresh_token_expire_days), session_version=user.session_version, created_at=now))
     db.add(AuditLog(actor_user_id=user.id, action="token_refreshed", resource_type="user", resource_id=str(user.id)))
     db.commit()
     response.set_cookie(REFRESH_COOKIE, raw_refresh, max_age=settings.refresh_token_expire_days * 86400, httponly=True, secure=settings.secure_cookies, samesite="lax", path="/")
@@ -257,16 +252,11 @@ def logout(response: Response, request: Request, refresh_cookie: str | None = Co
         except (jwt.PyJWTError, KeyError, ValueError):
             pass
     if refresh_cookie:
-        try:
-            rclaims = decode_refresh_token(refresh_cookie)
-            rid = UUID(rclaims["sub"])
-            if user is None or str(user.id) != str(rid):
-                user = db.get(User, rid)
-            refresh = db.scalar(select(RefreshToken).where(RefreshToken.token_hash == token_digest(refresh_cookie), RefreshToken.user_id == rid))
-            if refresh is not None:
-                refresh.revoked_at = datetime.now(timezone.utc)
-        except jwt.PyJWTError:
-            pass
+        refresh = db.scalar(select(RefreshToken).where(RefreshToken.token_hash == token_digest(refresh_cookie)))
+        if refresh is not None:
+            if user is None or str(user.id) != str(refresh.user_id):
+                user = db.get(User, refresh.user_id)
+            refresh.revoked_at = datetime.now(timezone.utc)
     if user is not None:
         db.add(AuditLog(actor_user_id=user.id, action="logout", resource_type="user", resource_id=str(user.id)))
     db.commit()
